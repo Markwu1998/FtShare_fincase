@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f2f6f6">
+<title>市场拥挤度观测台</title>
+<script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
+<link rel="stylesheet" href="/style.css">
+<script src="/echarts.min.js" defer></script>
+<script src="/assets/presentation.js" type="module"></script>
+<script src="/assets/crowding.js" type="module"></script>
+</head>
+<body>
+<button class="nav-backdrop" id="navBackdrop" aria-label="关闭图表导航" hidden></button>
+<aside class="chart-sidebar" id="chartNavigation" aria-label="图表导航">
+  <div class="sidebar-heading"><span class="sidebar-mark" aria-hidden="true">↗</span><div><strong>图表导航</strong></div><button id="chartNavClose" class="sidebar-close" type="button" aria-label="关闭图表导航">×</button></div>
+  <nav class="chart-directory" aria-label="图表目录">
+    <div class="directory-group"><a class="directory-section" href="#marketConcentration">成交额集中度</a><a href="#marketConcentrationChart">集中度与指数</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketStyle">大小盘风格</a><a href="#marketCapitalChart">总市值比值</a><a href="#marketTurnoverChart">成交额比值</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketIndustry">指数行业拥挤度</a><a href="#marketIndustryChart">行业占比走势</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketFunds">公募重仓集中度</a><a href="#marketFundChart">重仓行业走势</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketFinancing">融资与市场估值</a><a href="#marketBalanceChart">融资余额与净增</a><a href="#marketLeverageChart">融资增速与占比</a><a href="#marketValuationChart">市值与宏观比值</a></div>
+  </nav>
+  <a class="sidebar-top" href="#top">返回概览 <span>↑</span></a>
+</aside>
+<main class="wrap">
+  <header class="top" id="top">
+    <div class="top-line">
+      <a class="brand" href="#top"><span>RQData<span class="brand-product">MARKET CROWDING</span></span></a>
+      <div class="header-actions">
+        <div class="theme-switch crowding-theme" role="group" aria-label="切换主题">
+          <button type="button" data-theme-choice="light">浅色</button>
+          <button type="button" data-theme-choice="dark">深色</button>
+          <button type="button" data-theme-choice="system">系统</button>
+        </div>
+      </div>
+    </div>
+    <!-- observatory-switch -->
+    <div class="hero-heading"><div><h1>市场拥挤度观测台<span class="title-dot">.</span></h1></div><span class="market-label"><i></i>中国市场 · 沪深 A 股</span></div>
+    <div class="overview">
+      <a class="metric-card" href="#marketConcentration"><span class="metric-label">前 1% 成交额占比</span><strong id="marketTop1">—</strong><span class="metric-foot" id="marketTopDate"></span></a>
+      <a class="metric-card" href="#marketConcentration"><span class="metric-label">前 1% 成交额占比 · 历史分位</span><strong id="marketPercentile">—</strong><span class="metric-foot" id="marketSample"></span></a>
+      <a class="metric-card" href="#marketCapitalChart"><span class="metric-label">沪深300 / 中证1000 · 总市值</span><strong id="marketCapRatio">—</strong><span class="metric-foot" id="marketCapDate"></span></a>
+      <a class="metric-card" href="#marketTurnoverChart"><span class="metric-label">沪深300 / 中证1000 · 成交额</span><strong id="marketCashRatio">—</strong><span class="metric-foot" id="marketCashDate"></span></a>
+    </div>
+    <p class="data-note" id="marketStatus" role="status">正在读取市场日度快照</p>
+  </header>
+  <nav class="section-nav" aria-label="看板导航">
+    <div class="nav-sections"><a href="#marketConcentration">成交额集中度</a><a href="#marketStyle">大小盘风格</a><a href="#marketIndustry">行业拥挤度</a><a href="#marketFunds">公募重仓</a><a href="#marketFinancing">融资与估值</a></div>
+    <button class="chart-nav-toggle" id="chartNavToggle" type="button" aria-controls="chartNavigation" aria-expanded="false">图表导航</button>
+  </nav>
+  <div class="broad-controls">
+    <label>图表范围
+      <select id="marketDays">
+        <option value="20">近 20 个交易日</option><option value="60">近 60 个交易日</option>
+        <option value="125">近 125 个交易日</option><option value="250" selected>近 250 个交易日</option>
+        <option value="750">近 750 个交易日</option><option value="1250">近 1250 个交易日</option>
+        <option value="2500">近 2500 个交易日</option>
+      </select>
+    </label>
+  </div>
+  <section class="part" id="marketConcentration">
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketConcentrationContent"><span>A 股成交额集中度</span><span class="collapse-label">收起</span></button></h2>
+    <div class="section-content" id="marketConcentrationContent">
+      <div class="broad-controls">
+        <label>档位 <select id="marketTier"><option value="1">前 1%</option><option value="3">前 3%</option><option value="5">前 5%</option></select></label>
+        <label>叠加指数 <select id="marketIndex"><option value="">无</option></select></label>
+      </div>
+      <div class="chart-wrap"><div class="chart" id="marketConcentrationChart" aria-label="成交额集中度与指数走势"></div></div>
+      <details class="gap-report"><summary>数据与计算口径</summary><p>按当日沪深上市 A 股取数。有正成交额的股票参加排名，档位股数向上取整。分母为同一股票池成交额合计。已确认停牌按零成交处理，源数据缺失时该日留空。历史分位使用截至当日近五年已归档有效点，包含当日。</p></details>
+      <div class="table-wrap">
+        <h3 id="marketTableTitle">日度明细</h3>
+        <div class="broad-controls"><label>表格范围
+          <select id="marketTableDays"><option value="5">近 5 个交易日</option><option value="20">近 20 个交易日</option><option value="60">近 60 个交易日</option><option value="125">近 125 个交易日</option><option value="250">近 250 个交易日</option></select>
+        </label></div>
+        <div class="tscroll">
+          <table><thead><tr><th>交易日</th><th class="num">入选股数</th><th class="num">档位成交额（亿元）</th><th class="num">集中度</th><th class="num">历史分位</th><th class="num">有成交 / 停牌 / 缺数</th></tr></thead><tbody id="marketTable"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="part" id="marketStyle">
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketStyleContent"><span>大小盘风格</span><span class="collapse-label">收起</span></button></h2>
+    <div class="section-content" id="marketStyleContent">
+      <div class="chart-wrap"><div class="chart" id="marketCapitalChart" aria-label="沪深300与中证1000总市值比值"></div></div>
+      <div class="chart-wrap"><div class="chart" id="marketTurnoverChart" aria-label="沪深300与中证1000成交额比值"></div></div>
+      <details class="gap-report"><summary>数据与计算口径</summary><p>使用每个交易日生效的指数成分，分别汇总两组股票的总市值与成交额，再计算沪深300与中证1000的比值。任一成分缺数时对应指标留空。市值图的均值与 ±1σ、±2σ按所选区间有效日计算。</p></details>
+    </div>
+  </section>
+  <section class="part" id="marketIndustry">
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketIndustryContent"><span>指数行业拥挤度</span><span class="collapse-label">收起</span></button></h2>
+    <div class="section-content" id="marketIndustryContent">
+      <div class="broad-controls">
+        <label>指数 <select id="industryIndex"><option value="000300.XSHG">沪深300</option><option value="000905.XSHG">中证500</option></select></label>
+        <label>指标 <select id="industryMetric"><option value="capital">市值占比</option><option value="turnover">成交额占比</option></select></label>
+        <label>行业 <select id="industryChoice"><option value="">每周第一行业</option></select></label>
+      </div>
+      <p class="data-note" id="industryStatus" role="status">正在读取周度快照</p>
+      <div class="chart-wrap"><div class="chart" id="marketIndustryChart"></div></div>
+      <details class="gap-report"><summary>计算口径</summary><p>市值用周末有效成分，成交额汇总周内逐日有效成分。按周末 RQData 申万一级分类，分子分母均剔除银行、非银金融和石油石化。固定申万 2014 版待 Wind API 核验。按各期实际占比识别第一行业并标注区间峰值。</p></details>
+    </div>
+  </section>
+  <section class="part" id="marketFunds">
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketFundContent"><span>公募基金重仓集中度</span><span class="collapse-label">收起</span></button></h2>
+    <div class="section-content" id="marketFundContent">
+      <div class="broad-controls"><label>行业 <select id="fundIndustry"><option value="">每季第一行业</option></select></label></div>
+      <p class="data-note" id="fundStatus" role="status">正在读取季度快照</p>
+      <div class="chart-wrap"><div class="chart" id="marketFundChart"></div></div>
+      <details class="gap-report"><summary>计算口径</summary><p>标准股票型及偏股混合型基金，同一基金合并份额类别。按每只基金首次披露的前十大股票持仓统计其中的 A 股，以该样本持仓市值为分母。显示报告期、数据披露日期和基金覆盖。</p></details>
+    </div>
+  </section>
+  <section class="part" id="marketFinancing">
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketFinanceContent"><span>融资与市场估值</span><span class="collapse-label">收起</span></button></h2>
+    <div class="section-content" id="marketFinanceContent">
+      <div class="broad-controls"><label>叠加指数 <select id="financeIndex"><option value="">无</option></select></label></div>
+      <p class="data-note" id="financingStatus" role="status">正在读取融资与宏观快照</p>
+      <div class="chart-wrap"><div class="chart" id="marketBalanceChart"></div></div>
+      <div class="chart-wrap"><div class="chart" id="marketLeverageChart"></div></div>
+      <div class="chart-wrap"><div class="chart" id="marketValuationChart"></div></div>
+      <p class="coverage-note">沪深 A 股市值／住户存款 · 待 Wind API</p>
+      <details class="gap-report"><summary>计算口径</summary><p>融资余额取沪深两市融资余额。日均净增为较 20 个交易日前的余额差除以 20。周均同比用相隔 52 周的完整周均值。GDP 为最近四个已公布季度的名义 GDP 合计，M2 按公布日对齐。</p></details>
+    </div>
+  </section>
+</main>
+</body>
+</html>

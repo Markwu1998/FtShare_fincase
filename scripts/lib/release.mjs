@@ -1,11 +1,11 @@
 import { readdir, lstat, readFile } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
-export const releaseRoots = ['src', 'scripts', 'tests', 'config', 'docs', 'third_party', '.github', 'data/demo-seed.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md', '.gitignore', '.dockerignore', '.env.example', '.dev.vars.example', 'Dockerfile', 'compose.yaml', 'wrangler.jsonc', 'package.json', 'package-lock.json'];
+export const releaseRoots = ['src', 'scripts', 'tests', 'config', 'docs', 'third_party', '.github', 'etf_backend', 'requirements-python.txt', 'data/demo-seed.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md', '.gitignore', '.dockerignore', '.env.example', '.dev.vars.example', 'Dockerfile', 'compose.yaml', 'wrangler.jsonc', 'package.json', 'package-lock.json'];
 export async function releaseFiles(root) {
   const files = [];
   async function walk(path) {
     const file = relative(root, path).replaceAll('\\', '/');
-    if (/(^|\/)(node_modules|private|\.local|\.openai|\.git|\.wrangler|dist|worker|releases)(\/|$)/.test(file) || /(^|\/)\.DS_Store$/.test(file)) return;
+    if (/(^|\/)(node_modules|private|\.local|\.openai|\.git|\.wrangler|dist|worker|releases|__pycache__)(\/|$)/.test(file) || /(^|\/)\.DS_Store$/.test(file)) return;
     if (file === '.github/workflows/cloud-test-update.yml' || /^docs\/domain-migration-/.test(file)) return;
     const info = await lstat(path);
     if (info.isSymbolicLink()) throw new Error('Release must not include symlinks: ' + relative(root, path));

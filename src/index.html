@@ -38,6 +38,7 @@
         <a class="official-link" href="https://www.ricequant.com/doc/rqdata/python/index-rqdatac" target="_blank" rel="noopener noreferrer">RQData 文档 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></a>
       </div>
     </div>
+    <!-- observatory-switch -->
     <div class="hero-heading"><div><p class="eyebrow">ETF MARKET OBSERVATORY</p><h1>ETF 资金观测台<span class="title-dot">.</span></h1></div><span class="market-label"><i></i>中国市场 · 沪深 ETF</span></div>
     <div class="overview" aria-label="市场概览">
       <a class="metric-card" href="#chart"><span class="metric-label">核心 ETF 成交额 <span>↗</span></span><strong id="overviewAmount">—</strong><span class="metric-foot" id="overviewAmountDate">等待当日行情</span></a>
@@ -188,7 +189,23 @@
 </section>
     <div class="sub data-note" id="universeText"></div>
     <div class="status"><span class="tag" id="tagBroad">分类资金加载中</span></div>
+    <div class="broad-views" role="group" aria-label="日度资金全景视图">
+      <button type="button" data-view="flow" aria-pressed="true">申赎表</button>
+      <button type="button" data-view="total" aria-pressed="false">净申赎合计</button>
+      <button type="button" data-view="size" aria-pressed="false">日末规模</button>
+      <button type="button" data-view="premium" aria-pressed="false">收盘折溢价</button>
+    </div>
     <div class="broad-controls" aria-label="宽基资金统计区间">
+      <label>时间窗口
+        <select id="broadPeriod">
+          <option value="all">全部</option><option value="1">近一月</option>
+          <option value="6">近半年</option><option value="12">近一年</option>
+          <option value="24">近两年</option><option value="36">近三年</option>
+          <option value="60">近五年</option><option value="ytd">今年以来</option>
+          <option value="custom">自定义</option>
+        </select>
+      </label>
+      <label id="broadCategoryField" hidden>类别 <select id="broadCategory"><option value="">全部跟踪类别</option></select></label>
       <label>起始日期 <input id="broadStart" type="date"></label>
       <label>结束日期 <input id="broadEnd" type="date"></label>
       <span id="broadYears" class="broad-years" aria-label="按年度选择"></span>
@@ -204,6 +221,8 @@
         <div class="source-content"><dl>
           <div class="source-item"><dt>分类净申赎</dt><dd><code>fund.get_daily_units / fund.get_nav / fund.get_split</code><span>按份额变化与原始净值估算。上市首日缺少可核实前值时保留缺口，累计在缺口处停止。</span></dd></div>
           <div class="source-item"><dt>上证综指与分类成员</dt><dd><code>rqdatac.get_price(frequency="1d") / config/universe.json</code><span>指数使用不复权 close。分类及上市日期使用项目成员配置。</span></dd></div>
+          <div class="source-item"><dt>日末规模</dt><dd><code>fund.get_daily_units / fund.get_nav</code><span>同日份额 × 原始单位净值。类别成员数据齐全时显示规模。</span></dd></div>
+          <div class="source-item"><dt>收盘折溢价</dt><dd><code>rqdatac.get_price(frequency="1d", adjust_type="none") / fund.get_nav</code><span>仅纳入当日有成交且具有同日原始单位净值的基金，正为溢价，负为折价。</span></dd></div>
         </dl></div>
       </details>
 </section>
@@ -215,6 +234,7 @@
     <section class="table-wrap">
       <h2 id="broadTableTitle">最近一个月 · 各类宽基ETF日度净申购估算（亿元，红=净申购 / 绿=净赎回，颜色深浅按当列相对大小）</h2>
       <div class="tscroll"><table id="broadTable"></table></div>
+      <button id="broadExpand" type="button" aria-expanded="false" hidden>显示区间全部日期</button>
       <details class="chart-source" data-source-for="broadTable">
         <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
@@ -223,6 +243,10 @@
       </details>
 
     </section>
+    <details class="gap-report" id="broadMembers" hidden>
+      <summary id="broadMembersTitle">单只 ETF 折溢价</summary>
+      <div class="tscroll"><table id="broadMembersTable"></table></div>
+    </details>
     <footer>
       数据服务：RQData。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
     </footer>

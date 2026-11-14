@@ -11,7 +11,7 @@ const sign=(v,n=2)=>finite(v)?(v>0?'+':'')+fmt(v,n):'--';
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cst=()=>seed?.demo?seed.demo.as_of+'T15:00:00.000Z':new Date(Date.now()+8*3600000).toISOString();
 const storageKey=key=>'ftshare-oss:'+document.documentElement.dataset.dataMode+':'+key;
-let broadSelection=null,broadResetZoom=false,broadRangeInitialized=false;
+let broadSelection=null,broadResetZoom=false,broadView='flow',broadExpanded=false;
 let seed,live,loading=false,remaining=1,picked='',brushLoaded=false;
 async function get(path){const r=await fetch(path,{cache:'default',signal:AbortSignal.timeout(30000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources','RQData'].includes(d.provider))throw new Error('数据来源校验失败');return d;}
 function matchingLive(value){
@@ -133,28 +133,98 @@ function renderCases(){
  const sampleDates=[...sup,...normal].map(([d])=>d).sort();
  $('caseRange').textContent='历史样本'+(sampleDates.length?' '+sampleDates[0]+' 至 '+sampleDates.at(-1):'待补齐')+'：放量日 '+sup.length+' 日（净申购估算>100亿）；常态日 '+normal.length+' 日（≤100亿）。样本仅含完整分钟与资金数据，今日不纳入历史均值。紫线为今日分钟成交额，使用左轴；尚未发生或数据不完整的分钟留空。';
 }
+function broadPeriodStart(first,last,period){
+ if(period==='ytd')return [first,last.slice(0,4)+'-01-01'].sort().at(-1);
+ if(!Number(period))return first;
+ const date=new Date(last+'T00:00:00Z'),day=date.getUTCDate();
+ date.setUTCDate(1);
+ date.setUTCMonth(date.getUTCMonth()-Number(period));
+ const monthEnd=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).getUTCDate();
+ date.setUTCDate(Math.min(day,monthEnd));
+ return [first,date.toISOString().slice(0,10)].sort().at(-1);
+}
+function renderBroadMetric(b,metric,ids,dates,rows){
+ const premium=broadView==='premium',title=premium?'收盘折溢价':'日末规模',unit=premium?'%':'亿元';
+ const category=$('broadCategory').value,keys=category?[category]:b.cats;
+ const expected=i=>keys.reduce((sum,c)=>sum+b.coverage[c].expected[i],0);
+ const valid=i=>keys.reduce((sum,c)=>sum+metric.valid[c][i],0);
+ const values=category?metric.series[category]:metric.total;
+ const format=v=>!finite(v)?'--':premium?sign(v,3)+'%':fmt(v,2);
+ const latest=ids.at(-1),shown=ids.filter(i=>finite(values[i])).length;
+ $('broadCoverage').innerHTML=[['统计区间',dates.length?dates[0]+' — '+dates.at(-1):'无交易日'],['有数据交易日',shown+' / '+ids.length],['区间末日有效成员',latest==null?'--':valid(latest)+' / '+expected(latest)],['区间末日'+title,format(values[latest])]].map(([name,value])=>'<div><span>'+name+'</span><strong>'+value+'</strong></div>').join('');
+ const incomplete=ids.some(i=>valid(i)<expected(i));
+ $('broadCumulativeNote').className='coverage-note'+(incomplete?' has-gaps':'');
+ $('broadCumulativeNote').textContent=premium?'当日有成交的 ETF 不复权收盘价 ÷ 同日原始单位净值 − 1。对有效成员等权平均，表中列出样本覆盖。':'同日基金份额 × 原始单位净值。所选范围任一已上市成员缺数时，当日规模留空。';
+ $('broadIndexNote').textContent='';
+ const fresh=b.dates.indexOf(metric.latest),covered=valid(fresh),target=expected(fresh);
+ tag('tagBroad',metric.latest+' ｜ 有效成员 '+covered+'/'+target+'只',covered===target?'ok':'warn');
+ const o=base((category||'全部跟踪类别')+' · '+title,dates,unit);
+ o.yAxis.scale=true;
+ o.series=[line(premium?'平均折溢价':title,ids.map(i=>values[i]),colors.blue)];
+ o.tooltip.formatter=ps=>{const p=ps[0];if(!p)return '';const i=ids[p.dataIndex];return p.axisValue+'<br>'+title+'：'+format(p.value)+(premium?'':' '+unit)+'<br>有效成员 '+valid(i)+' / '+expected(i)+'只';};
+ draw('chartBroad',o);
+ $('broadTableTitle').textContent=title+'明细（'+unit+'）';
+ $('broadTable').innerHTML='<thead><tr><th>日期</th><th class="num">'+title+'</th><th class="num">有效 / 应纳入</th></tr></thead><tbody>'+rows.map(i=>'<tr><td>'+b.dates[i]+'</td><td class="num">'+format(values[i])+'</td><td class="num">'+valid(i)+' / '+expected(i)+'</td></tr>').join('')+'</tbody>';
+ if(premium&&dates.includes(metric.latest)){
+  const names=new Map(seed.universe.map(f=>[f.symbol,f.name]));
+  const members=metric.members.filter(r=>!category||r.category===category).sort((a,b)=>b.value-a.value);
+  $('broadMembers').hidden=!members.length;
+  $('broadMembersTitle').textContent=metric.latest+' · 单只 ETF 收盘折溢价（'+members.length+' 只）';
+  $('broadMembersTable').innerHTML='<thead><tr><th>基金</th><th>类别</th><th class="num">折溢价率</th></tr></thead><tbody>'+members.map(r=>'<tr><td>'+escape(r.symbol+' '+(names.get(r.symbol)||''))+'</td><td>'+escape(r.category)+'</td><td class="num">'+format(r.value)+'</td></tr>').join('')+'</tbody>';
+ }
+}
 function renderBroad(){
- const b=seed.broad,available=b.dates.map((d,i)=>i).filter(i=>b.dates[i]<=seed.latest_flow_date);
- if(!available.length){tag('tagBroad','日度份额与净值待发布','warn');$('broadCumulativeNote').textContent='日度份额与净值待发布';return;}
+ const b=seed.broad,metric=seed.broad_metrics?.[broadView],isMetric=['size','premium'].includes(broadView);
+ const latestDate=isMetric?metric?.latest:seed.latest_flow_date;
+ const available=b.dates.map((d,i)=>i).filter(i=>latestDate&&b.dates[i]<=latestDate);
+ $('broadCategoryField').hidden=!isMetric;
+ $('broadRecent').hidden=isMetric;
+ $('broadMembers').hidden=true;
+ $('broadGapReport').hidden=true;
+ $('broadExpand').hidden=true;
+ if(!$('broadCategory').options[1]){
+  for(const c of b.cats)$('broadCategory').add(new Option(c,c));
+ }
+ if(!available.length){
+  const message=isMetric?'当前快照暂无此指标，请更新 RQData 历史快照。':'日度份额与净值待发布';
+  tag('tagBroad',message,'warn');
+  $('broadCumulativeNote').textContent=message;
+  $('broadCoverage').innerHTML=$('broadIndexNote').textContent=$('broadTableTitle').textContent=$('broadTable').innerHTML='';
+  $('broadYears').innerHTML='';
+  for(const id of ['broadStart','broadEnd'])$(id).value='';
+  charts.chartBroad?.clear();
+  return;
+ }
  const first=b.dates[available[0]],lastDate=b.dates[available.at(-1)];
- if(!broadRangeInitialized){broadRangeInitialized=true;broadSelection=null;}
  const years=[...new Set(available.map(i=>b.dates[i].slice(0,4)))];
  $('broadYears').innerHTML=years.map(y=>'<button type="button" data-year="'+y+'">'+y+'年</button>').join('');
- for(const button of $('broadYears').querySelectorAll('button'))button.addEventListener('click',()=>{const ds=available.map(i=>b.dates[i]).filter(d=>d.startsWith(button.dataset.year));broadSelection={start:ds[0],end:ds.at(-1)};broadResetZoom=true;renderBroad();});
- const from=broadSelection?.start||first,to=broadSelection?.end||lastDate;
+ for(const button of $('broadYears').querySelectorAll('button'))button.addEventListener('click',()=>{const ds=available.map(i=>b.dates[i]).filter(d=>d.startsWith(button.dataset.year));setBroadRange(ds[0],ds.at(-1));});
+ const from=broadSelection?.start||broadPeriodStart(first,lastDate,$('broadPeriod').value),to=broadSelection?.end||lastDate;
  for(const id of ['broadStart','broadEnd']){$(id).min=first;$(id).max=lastDate;}
  $('broadStart').value=from;$('broadEnd').value=to;
- if(from>to){$('broadCumulativeNote').textContent='起始日期不能晚于结束日期。';return;}
  const ids=available.filter(i=>b.dates[i]>=from&&b.dates[i]<=to),dates=ids.map(i=>b.dates[i]);
+ const rows=(broadExpanded?ids:ids.slice(-22)).slice().reverse();
+ $('broadExpand').hidden=ids.length<=22;
+ $('broadExpand').textContent=broadExpanded?'仅显示最近 22 日':'显示区间全部 '+ids.length+' 日';
+ $('broadExpand').setAttribute('aria-expanded',String(broadExpanded));
+ if(isMetric){
+  renderBroadMetric(b,metric,ids,dates,rows);
+  broadResetZoom=false;
+  if(from>to)$('broadCumulativeNote').textContent='起始日期不能晚于结束日期。';
+  return;
+ }
  const coverage=cumulativeWindow(dates,ids.map(i=>b.total[i]));
  $('broadCoverage').innerHTML=[['统计区间',dates.length?dates[0]+' — '+dates.at(-1):'无交易日'],['交易日',dates.length+'天'],['数据完整',coverage.completeDays+'天'],['数据不完整',coverage.missingDays+'天']].map(([name,value])=>'<div><span>'+name+'</span><strong>'+value+'</strong></div>').join('');
  const early=first>'2026-01-05'?'本图累计区间从'+first+'开始。':'';
  const cumulativeLast=coverage.cumulativeThrough?coverage.values[dates.indexOf(coverage.cumulativeThrough)]:null;
- const prefix=!dates.length?'所选区间无可用交易日。':coverage.missingDays?(coverage.cumulativeThrough?'累计仅计算至'+coverage.cumulativeThrough+'：'+sign(cumulativeLast,1)+'亿元；'+coverage.firstMissingDate+'起存在缺口，后续累计停止。':'区间首日数据不完整，无法计算本区间累计。'):'区间累计自首个交易日起计算，截至'+coverage.cumulativeThrough+'：'+sign(cumulativeLast,1)+'亿元。';
+ const prefix=from>to?'起始日期不能晚于结束日期。':!dates.length?'所选区间无可用交易日。':coverage.missingDays?(coverage.cumulativeThrough?'累计仅计算至'+coverage.cumulativeThrough+'：'+sign(cumulativeLast,1)+'亿元；'+coverage.firstMissingDate+'起存在缺口，后续累计停止。':'区间首日数据不完整，无法计算本区间累计。'):'区间累计自首个交易日起计算，截至'+coverage.cumulativeThrough+'：'+sign(cumulativeLast,1)+'亿元。';
  $('broadCumulativeNote').textContent=prefix+(coverage.missingDays?' 缺失日不补零、不跳过续接。':'')+early;
  $('broadCumulativeNote').className='coverage-note'+(coverage.missingDays||early?' has-gaps':'');
  const o=base(from===first&&to===lastDate?first.slice(0,4)+'年以来 宽基ETF日度净流入与累计净流入':from.slice(0,4)===to.slice(0,4)?from.slice(0,4)+'年 · 宽基ETF日度净流入与累计净流入':'所选区间 · 宽基ETF日度净流入与累计净流入',dates);o.legend={...o.legend,itemWidth:12,itemHeight:10,data:['累计净流入','上证指数',...b.cats,...(coverage.missingDays?['数据不完整']:[])]};o.grid.right=90;o.yAxis=[{type:'value',name:'当日净流入（亿元）',scale:true,nameTextStyle:{align:'left'}},{type:'value',name:'累计净流入（亿元）',scale:true,position:'right',splitLine:{show:false},nameTextStyle:{align:'right'}},{type:'value',name:'上证指数（点）',scale:true,position:'right',offset:76,nameLocation:'end',nameRotate:0,nameGap:16,nameTextStyle:{align:'left',verticalAlign:'bottom'},splitLine:{show:false}}];
- o.series=b.cats.map((c,i)=>({name:c,type:'bar',stack:'broad',data:ids.map(j=>b.series[c][j]),itemStyle:{color:chartTheme().categories[i]}}));
+ const totalView=broadView==='total';
+ if(totalView)o.title.text='宽基 ETF 日度净申赎合计';
+ if(totalView)o.legend.data.splice(2,b.cats.length,'日度净申赎合计');
+ o.series=totalView?[bars('日度净申赎合计',ids.map(i=>b.total[i]),'flow')]:b.cats.map((c,i)=>({name:c,type:'bar',stack:'broad',data:ids.map(j=>b.series[c][j]),itemStyle:{color:chartTheme().categories[i]}}));
  const cumulativeLine=line('累计净流入',coverage.values,'#1f2d3d',1);
  if(coverage.cumulativeThrough)cumulativeLine.markPoint={symbol:'circle',symbolSize:6,label:{show:true,position:coverage.cumulativeThrough===dates.at(-1)?'left':'top',distance:8,formatter:coverage.cumulativeThrough+'\n累计 '+sign(cumulativeLast,1)+'亿元',fontSize:11,color:'#1f2d3d',backgroundColor:'rgba(255,255,255,.94)',padding:[4,6],borderColor:'#dfe4eb',borderWidth:1},data:[{coord:[coverage.cumulativeThrough,cumulativeLast]}]};
  const indexByDate=new Map(seed.history.dates.map((d,i)=>[d,seed.history.idx[i]]));
@@ -162,18 +232,24 @@ function renderBroad(){
  $('broadIndexNote').textContent='橙色虚线：上证指数日收盘价（点，最右轴）'+(indexDates.length?'；'+indexDates[0]+' 至 '+indexDates.at(-1):'；所选区间暂无指数数据')+(indexDates.length<dates.length?'，缺失日期留空。':'。');
  o.series.push(cumulativeLine,{...line('上证指数',indexValues,colors.orange,2,true),z:4});
  if(coverage.missingDays)o.series.push({name:'数据不完整',type:'scatter',data:ids.map(i=>finite(b.total[i])?null:0),symbol:'diamond',symbolSize:7,itemStyle:{color:'#bd7c19'},z:5});
- o.tooltip.formatter=ps=>{const ix=ids[ps[0]?.dataIndex],out=[ps[0]?.axisValue];for(const p of ps){if(p.seriesType==='bar'){const c=b.coverage[p.seriesName];out.push(escape(p.seriesName)+'：'+sign(p.value,2)+'亿（'+c.valid[ix]+'/'+c.expected[ix]+'只）');}else if(p.seriesType==='scatter')out.push('当日分类数据不完整，详见日期说明');else if(p.seriesName==='上证指数')out.push('上证指数：'+fmt(p.value,2)+'点');else out.push('累计净流入：'+sign(p.value,1)+'亿');}return out.join('<br>');};draw('chartBroad',o);broadResetZoom=false;
+ o.tooltip.formatter=ps=>{const ix=ids[ps[0]?.dataIndex],out=[ps[0]?.axisValue];for(const p of ps){if(p.seriesType==='bar'){const c=b.coverage[p.seriesName];out.push(escape(p.seriesName)+'：'+sign(p.value,2)+'亿'+(c?'（'+c.valid[ix]+'/'+c.expected[ix]+'只）':''));}else if(p.seriesType==='scatter')out.push('当日分类数据不完整，详见日期说明');else if(p.seriesName==='上证指数')out.push('上证指数：'+fmt(p.value,2)+'点');else out.push('累计净流入：'+sign(p.value,1)+'亿');}return out.join('<br>');};draw('chartBroad',o);broadResetZoom=false;
  const latest=available.at(-1),valid=b.cats.reduce((s,c)=>s+b.coverage[c].valid[latest],0),expected=b.cats.reduce((s,c)=>s+b.coverage[c].expected[latest],0);
  tag('tagBroad',b.dates[latest]+' ｜ 已上市成员有效数据 '+valid+'/'+expected+'只',valid===expected?'ok':'warn');
- const rows=ids.slice(-22).reverse(),cols=['合计',...b.cats],val=(i,c)=>c==='合计'?b.total[i]:b.series[c][i],max=Object.fromEntries(cols.map(c=>[c,Math.max(1,...rows.map(i=>Math.abs(val(i,c)||0)))]));
- $('broadTableTitle').textContent='分类净流入 · 最近'+rows.length+'个交易日（亿元）';
+ const cols=totalView?['合计']:[...b.cats,'合计'],val=(i,c)=>c==='合计'?b.total[i]:b.series[c][i],max=Object.fromEntries(cols.map(c=>[c,Math.max(1,...rows.map(i=>Math.abs(val(i,c)||0)))]));
+ $('broadTableTitle').textContent=(totalView?'日度净申赎合计':'分类净申赎估算')+'（亿元）';
  $('broadTable').innerHTML='<thead><tr><th>日期</th>'+cols.map(c=>'<th class="num">'+escape(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(i=>'<tr><td>'+b.dates[i]+'</td>'+cols.map(c=>{const v=val(i,c),a=finite(v)?(.06+.5*Math.min(1,Math.abs(v)/max[c])):0,style=finite(v)&&v!==0?'background:rgba('+(v>0?'217,54,48,':'10,160,110,')+a+');':'';return '<td class="num" style="'+style+'">'+sign(v,c==='合计'?1:2)+'</td>';}).join('')+'</tr>').join('')+'</tbody>';
  $('broadGapReport').hidden=coverage.missingDays===0;
+ const totals=cols.map(c=>{const values=ids.map(i=>val(i,c));return values.length&&values.every(finite)?values.reduce((s,v)=>s+v,0):null;});
+ $('broadTable').insertAdjacentHTML('beforeend','<tfoot><tr><th scope="row">区间合计</th>'+totals.map(v=>'<td class="num">'+sign(v,2)+'</td>').join('')+'</tr></tfoot>');
  $('broadGapSummary').textContent='查看'+coverage.missingDays+'个不完整交易日与原因';
  const gapRows=coverage.missingDates.flatMap(d=>{const issues=b.issues?.[d];return issues?.length?issues.map(v=>({date:d,...v})):[{date:d,symbol:'--',name:'--',bucket:'--',reasons:['source_missing']}];});
  $('broadGapTable').innerHTML='<thead><tr><th>日期</th><th>基金</th><th>类别</th><th>原因</th></tr></thead><tbody>'+gapRows.map(r=>'<tr><td>'+r.date+'</td><td>'+escape(r.symbol+' '+r.name)+'</td><td>'+escape(r.bucket)+'</td><td>'+escape(r.reasons.map(v=>FLOW_ISSUE_LABELS[v]||'记录需核对').join('；'))+'</td></tr>').join('')+'</tbody>';
 }
-function setBroadRange(){broadResetZoom=true;broadSelection={start:$('broadStart').value,end:$('broadEnd').value};renderBroad();}
+function setBroadRange(start,end){
+ broadResetZoom=true;broadExpanded=false;broadSelection={start,end};
+ $('broadPeriod').value='custom';
+ renderBroad();
+}
 function renderMinute(){
  if(!live)return;safely('市场概览',renderOverview);
  let o=base('20只ETF分钟成交额与上证综指',live.slots,'亿元/分钟');o.series=[bars('分钟成交额合计',live.bars)];o=addIndex(o,live.closes);o.yAxis[0].name='亿元/分钟';if(live.pre_close)o.series[1].markLine={silent:true,symbol:['none','none'],data:[{yAxis:live.pre_close}],label:{formatter:'昨收 '+fmt(live.pre_close)},lineStyle:{type:'dashed',color:'#999'}};draw('chart',o);
@@ -217,7 +293,7 @@ async function refresh(){
   if(live.replay)tag('tagUpdate','历史回放 '+live.date+' '+live.last_complete_minute,'warn');
   else if(live.provider==='RQData'&&live.cache?.stale)tag('tagUpdate','行情已陈旧 · '+live.date+' '+live.last_complete_minute,'warn');
   if(live.cache?.last_error&&live.cache.last_error!=='partial_upstream')tag('tagUpdate','云端采集暂缓；行情保留至 '+live.date+' '+(live.last_complete_minute||'--'),'warn');
- }catch(e){tag('tagUpdate',live?'缓存读取暂缓；保留 '+live.date+' '+(live.last_complete_minute||'')+' 的成功数据':'后台行情尚未就绪；历史图表可继续查看','warn');}
+}catch(e){tag('tagUpdate',live?'缓存读取暂缓；保留 '+live.date+' '+(live.last_complete_minute||'')+' 的成功数据':'分时和成交雷达等待盘中采集；日度及历史图表可继续查看','warn');}
  finally{loading=false;}
 }
 function tick(){
@@ -233,9 +309,22 @@ try{
  renderCloudStatus();
  if(!$('etfTable').innerHTML)$('etfTable').innerHTML=seed.universe.filter(f=>f.is_core_basket).map(f=>'<tr><td>'+escape(f.symbol.slice(0,6))+'</td><td>'+escape(f.name)+'</td><td class="num">--</td><td class="num">--</td><td class="num">--</td></tr>').join('');
  $('universeText').textContent='宽基分类：'+seed.universe.length+'只ETF，按当前跟踪指数分组回溯（含增强ETF），从上市日起纳入。累计遇缺失日停止，日期与原因可展开查看。';
- $('broadStart').addEventListener('change',setBroadRange);$('broadEnd').addEventListener('change',setBroadRange);
- $('broadAll').addEventListener('click',()=>{broadResetZoom=true;broadSelection=null;renderBroad();});
- $('broadRecent').addEventListener('click',()=>{const b=seed.broad,ids=b.dates.map((d,i)=>i).filter(i=>b.dates[i]<=seed.latest_flow_date&&b.dates[i]>=$('broadStart').value&&b.dates[i]<=$('broadEnd').value);const range=cumulativeWindow(ids.map(i=>b.dates[i]),ids.map(i=>b.total[i])).lastCompleteRange;if(range){broadResetZoom=true;broadSelection=range;renderBroad();}});
+ for(const id of ['broadStart','broadEnd'])$(id).addEventListener('change',()=>setBroadRange($('broadStart').value,$('broadEnd').value));
+ $('broadPeriod').addEventListener('change',()=>{
+  if($('broadPeriod').value==='custom'){setBroadRange($('broadStart').value,$('broadEnd').value);return;}
+  broadResetZoom=true;broadSelection=null;broadExpanded=false;renderBroad();
+ });
+ $('broadAll').addEventListener('click',()=>{$('broadPeriod').value='all';$('broadPeriod').dispatchEvent(new Event('change'));});
+ $('broadRecent').addEventListener('click',()=>{const b=seed.broad,ids=b.dates.map((d,i)=>i).filter(i=>b.dates[i]<=seed.latest_flow_date&&b.dates[i]>=$('broadStart').value&&b.dates[i]<=$('broadEnd').value);const range=cumulativeWindow(ids.map(i=>b.dates[i]),ids.map(i=>b.total[i])).lastCompleteRange;if(range)setBroadRange(range.start,range.end);});
+ $('broadCategory').addEventListener('change',()=>{broadExpanded=false;renderBroad();});
+ $('broadExpand').addEventListener('click',()=>{broadExpanded=!broadExpanded;renderBroad();});
+ const views=[...document.querySelectorAll('.broad-views button')];
+ for(const button of views)button.addEventListener('click',()=>{
+  if(broadView===button.dataset.view)return;
+  broadView=button.dataset.view;broadResetZoom=true;broadExpanded=false;
+  for(const view of views)view.setAttribute('aria-pressed',String(view===button));
+  renderBroad();
+ });
  safely('历史图表',renderDaily);safely('累计成交图表',renderCum);
  const lastLive=saved('ftshare-last-live-v1');if(matchingLive(lastLive)){live=lastLive;safely('已保存行情',renderMinute);tag('tagUpdate','已保存行情 '+live.date+' '+(live.last_complete_minute||'')+'；正在更新','warn');}
  const dates=Object.keys(seed.minutes).sort().reverse();for(const d of dates){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').appendChild(op);}picked=dates[0]||'';$('cumDate').value=picked;renderCum();

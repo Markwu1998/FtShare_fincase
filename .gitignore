@@ -18,3 +18,5 @@ data/private/
 compose.local.yaml
 
 config/intraday-worker.local.jsonc
+__pycache__/
+.venv/

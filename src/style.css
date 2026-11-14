@@ -39,3 +39,18 @@ button{border:1px solid var(--line);border-radius:8px;padding:7px 11px;backgroun
 @media(max-width:600px){.radar-funds{grid-template-columns:1fr}.radar-heading h2{font-size:23px}.radar-state-badge{padding:7px 10px;font-size:10px}.radar-summary{gap:10px}.radar-summary p{font-size:11px}.radar-fund{padding:18px}.radar-metrics>div{padding:0 12px}.radar-metrics strong{font-size:26px}.radar-heading{align-items:flex-start}.radar-session{margin-top:3px}}
 
 .radar-baselines{font-size:11px;color:var(--muted)}#radarBurst{font-size:23px;letter-spacing:-.5px}@media(max-width:850px){.radar-metrics>div:nth-child(even){border:0}.radar-metrics>div:last-child{grid-column:1/-1}.radar-baselines{flex-basis:100%}}
+.broad-views{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.broad-views button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.broad-controls label[hidden]{display:none}
+#broadExpand{margin-top:10px}
+#broadTable tfoot th,#broadTable tfoot td{background:var(--surface);font-weight:700}
+.observatory-switch{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.observatory-switch a{padding:8px 13px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:13px;font-weight:600;text-decoration:none}
+.observatory-switch a[aria-current="page"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.observatory-switch a:hover{color:var(--accent)}
+.crowding-theme button{width:auto;padding:0 8px}
+#marketStatus{margin-top:12px}
+#marketStyle .chart-wrap+.chart-wrap{margin-top:14px}
+#marketFinancing .chart-wrap+.chart-wrap{margin-top:14px}
+#marketIndustry .data-note,#marketFunds .data-note,#marketFinancing .data-note{margin-bottom:10px}
+.wrap:has(#marketIndustry) .nav-sections{flex-wrap:wrap}

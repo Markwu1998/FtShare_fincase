@@ -1,0 +1,255 @@
+"""FastAPI server for the existing dashboard and read-only HTTP API."""
+from datetime import datetime, timezone
+import json
+from math import sin
+import os
+import re
+from threading import Lock
+from statistics import mean, pstdev
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+
+from .collect import ROOT, read
+from .crowding import DEFAULT_PATH as CROWDING_PATH, validate_snapshot as validate_crowding
+from .crowding_extra import MODULES, path_for, validate_extra
+from .model import BASKET, CATEGORIES, DEFAULT_STATUS, FORMULA, SLOTS, finite
+
+ASSETS = {
+    "/style.css": "src/style.css", "/echarts.min.js": "src/echarts.min.js",
+    **{f"/assets/{name}": f"src/assets/{name}" for name in (
+        "dashboard.js", "flow-math.js", "radar.js", "radar-math.js", "brush.js", "presentation.js", "crowding.js", "ftai-mark.svg"
+    )},
+    "/licenses/MIT.txt": "LICENSE",
+    "/licenses/echarts-LICENSE.txt": "third_party/echarts/LICENSE",
+    "/licenses/echarts-NOTICE.txt": "third_party/echarts/NOTICE",
+    "/licenses/d3-LICENSE.txt": "third_party/echarts/licenses/LICENSE-d3",
+}
+
+
+def validate_seed(seed, mode):
+    history = seed["history"]
+    dates = history["dates"]
+    if seed["schema"] != 1 or seed["formula"] != FORMULA or seed["categories"] != CATEGORIES or not dates or (
+            dates != sorted(set(dates)) or not all(len(history[key]) == len(dates) for key in (
+                "idx", "amount", "netflow", "flow_coverage", "flow_expected"))):
+        raise ValueError("Invalid snapshot")
+    if mode == "live" and (seed.get("demo") or seed["provider"] != "RQData" or seed["minute_slots"] != SLOTS):
+        raise ValueError("Live mode requires an RQData snapshot")
+    if mode == "demo" and not (seed.get("demo") and seed["provider"] == "Demo"):
+        raise ValueError("Invalid demo snapshot")
+    if {fund["symbol"] for fund in seed["universe"] if fund["is_core_basket"]} != set(BASKET):
+        raise ValueError("Invalid core membership")
+    broad = seed["broad"]
+    size = len(broad["dates"])
+    if not size or len(broad["total"]) != size or any(
+            len(broad["series"][category]) != size or
+            any(len(broad["coverage"][category][key]) != size for key in ("valid", "expected"))
+            for category in CATEGORIES):
+        raise ValueError("Invalid broad history")
+    if "broad_metrics" in seed:
+        for name in ("size", "premium"):
+            metric = seed["broad_metrics"][name]
+            if (len(metric["total"]) != size or any(
+                    len(metric[key][category]) != size
+                    for key in ("series", "valid") for category in CATEGORIES)
+                    or (metric["latest"] is not None and metric["latest"] not in broad["dates"])
+                    or not isinstance(metric["members"], list)):
+                raise ValueError("Invalid broad metrics")
+    slots = len(seed["minute_slots"])
+    if any(len(row["bars"]) != slots or len(row["cumulative"]) != slots for row in seed["minutes"].values()):
+        raise ValueError("Invalid minute archive")
+    if not all(value is None or finite(value) for key in ("idx", "amount", "netflow") for value in history[key]):
+        raise ValueError("Invalid history values")
+    return seed
+
+
+class Archive:
+    def __init__(self, path, validate):
+        self.path = path
+        self.validate = validate
+        self.value = None
+        self.version = None
+        self.lock = Lock()
+
+    def load(self):
+        with self.lock:
+            try:
+                info = self.path.stat()
+                version = (info.st_ino, info.st_size, info.st_mtime_ns)
+                if version != self.version:
+                    self.value = self.validate(read(self.path))
+                    self.version = version
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+            return self.value
+
+
+def demo_live(seed):
+    date = seed["demo"]["as_of"]
+    row = seed["minutes"][date]
+    amount = row["cumulative"][-1]
+    names = {f["symbol"]: f["name"] for f in seed["universe"]}
+    return {"provider": "Demo", "formula": seed["formula"], "date": date, "fetched_at": seed["built_at"],
+            "slots": seed["minute_slots"], **row, "coverage": [20] * len(row["bars"]), "pre_close": 3490,
+            "closes": [3500 + 22 * sin(i / 42) for i in range(len(row["bars"]))],
+            "last_complete_minute": "15:00", "expected_flow_date": seed["latest_flow_date"],
+            "trading_dates": seed["calendar"], "daily_batches": (len(names) + 7) // 8, "warnings": [], "amount": amount,
+            "table": [{"symbol": s, "code": s[:6], "name": names[s], "price": 1 + i / 10,
+                       "amount": amount * (i + 1) / 210, "pct": sin(i) * 1.2} for i, s in enumerate(BASKET)]}
+
+
+def validate_cache(value):
+    entry = json.loads(value["entries"].get("live:rqdata:snapshot", "null"))
+    if entry is None:
+        return None
+    live = entry["value"]
+    if live["provider"] != "RQData" or live["slots"] != SLOTS or any(
+            len(live[key]) != len(SLOTS) for key in ("bars", "coverage", "closes", "cumulative")):
+        raise ValueError("Invalid minute cache")
+    fetched_at = datetime.fromisoformat(live["fetched_at"].replace("Z", "+00:00"))
+    if fetched_at.utcoffset() is None:
+        raise ValueError("Missing quote timestamp offset")
+    return entry
+
+
+def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_replay=None, crowding_file=None):
+    mode = mode or os.environ.get("DATA_MODE", "demo")
+    if mode not in {"demo", "live"}:
+        raise ValueError("Invalid DATA_MODE")
+    demo = mode == "demo"
+    if radar is None:
+        radar = os.environ.get("ENABLE_RADAR") == "1"
+    if allow_replay is None:
+        allow_replay = os.environ.get("RQDATA_ALLOW_REPLAY") == "1"
+    seed_path = ROOT / ("data/demo-seed.json" if demo else
+                        (seed_file or os.environ.get("FTSHARE_SEED_FILE", "data/private/rqdata-seed.json")))
+    cache_path = ROOT / (cache_file or os.environ.get("FTSHARE_LIVE_CACHE_FILE", "data/private/rqdata-live.json"))
+    archive = Archive(seed_path, lambda value: validate_seed(value, mode))
+    cache = Archive(cache_path, validate_cache)
+    crowding_path = ROOT / (crowding_file or os.environ.get("CROWDING_FILE") or CROWDING_PATH)
+    crowding = Archive(crowding_path, validate_crowding)
+    crowding_modules = {module: Archive(path_for(module, crowding_path),
+                                        lambda value, module=module: validate_extra(value, module))
+                        for module in MODULES}
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    index = (ROOT / "src/index.html").read_text(encoding="utf-8").replace(
+        'data-data-mode="demo"', f'data-data-mode="{mode}"').replace(
+        'data-radar="off"', 'data-radar="on"' if radar else 'data-radar="off"')
+    source = "Demo" if demo else "RQData"
+    crowding_page = (ROOT / "src/crowding.html").read_text(encoding="utf-8")
+    def with_observatory_switch(page, active):
+        tabs = "".join(
+            f'<a href="{url}"' + (' aria-current="page"' if active == url else '') + f'>{name}</a>'
+            for url, name in (("/", "ETF 资金观测台"), ("/crowding", "市场拥挤度观测台"))
+        )
+        return page.replace('<!-- observatory-switch -->',
+                            f'<nav class="observatory-switch" aria-label="切换观测台">{tabs}</nav>')
+
+    index = with_observatory_switch(index, "/")
+    crowding_page = with_observatory_switch(crowding_page, "/crowding")
+
+    def response(value, status=200):
+        return JSONResponse(value, status, headers={"Cache-Control": "no-store", "X-Data-Provider": source})
+
+    def error(message, code, status):
+        return response({"error": message, "code": code}, status)
+
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"])
+    def route(path: str, request: Request):
+        if len(request.url.query) > 256:
+            return error("查询参数过长", "query_too_long", 414)
+        key = "/" + path
+        if key == "/":
+            return HTMLResponse(index, headers={"Cache-Control": "no-cache"})
+        if key in {"/crowding", "/crowding/"}:
+            return HTMLResponse(crowding_page, headers={"Cache-Control": "no-cache"})
+        if key.startswith("/api/crowding/"):
+            module = key.removeprefix("/api/crowding/")
+            if module not in crowding_modules:
+                return error("指标不存在", "not_found", 404)
+            value = None if demo else crowding_modules[module].load()
+            return response(value) if value is not None else error("指标尚未归档", "crowding_not_ready", 503)
+        if key == "/api/crowding":
+            snapshot = None if demo else crowding.load()
+            if snapshot is None:
+                return error("市场拥挤度数据尚未归档", "crowding_not_ready", 503)
+            rows = snapshot["rows"]
+            period = request.query_params.get("days", "250")
+            table_period = request.query_params.get("table_days", "5")
+            if period not in {"20", "60", "125", "250", "750", "1250", "2500"} or table_period not in {
+                    "5", "20", "60", "125", "250"}:
+                return error("无效的交易日范围", "invalid_range", 400)
+            selected = rows[-int(period):]
+            sample = [row["style"]["capital"] for row in selected if row["style"]["capital"] is not None]
+            return response({**snapshot, "first_date": rows[0]["date"], "last_date": rows[-1]["date"], "archived_days": len(rows),
+                             "rows": selected,
+                             "table_rows": [{"date": row["date"], "concentration": row["concentration"]}
+                                            for row in rows[-int(table_period):]], "capital_stats": {
+                                 "count": len(sample), "mean": mean(sample) if sample else None,
+                                 "std": pstdev(sample) if sample else None}})
+        if key in ASSETS:
+            return FileResponse(ROOT / ASSETS[key], headers={"Cache-Control": "no-cache"})
+        if key == "/favicon.ico":
+            return Response(status_code=204)
+        if key not in {"/api/health", "/api/board", "/api/live", "/api/history", "/api/cumulative", "/api/daily"}:
+            return error("页面不存在", "not_found", 404)
+        seed = archive.load()
+        if seed is None:
+            return error("历史归档尚未就绪", "history_not_ready", 503)
+        if key == "/api/health":
+            return response({"provider": source, "mode": mode, "sources": seed["sources"],
+                             "configured": not demo and (cache_path.is_file() or bool(seed.get("live_snapshot"))),
+                             "history_built_at": seed["built_at"], "formula": seed["formula"],
+                             "flow_policy": seed["flow_policy"], "funds": len(seed["universe"]),
+                             "cloud_update": seed.get("cloud_update"), "update_policy": DEFAULT_STATUS})
+        if key == "/api/board":
+            return response(seed if demo else {**seed, "update_policy": DEFAULT_STATUS})
+        if key == "/api/history":
+            history = seed["history"]
+            return response({"provider": source, "rows": [{"date": d, "amount": a, "idx": i} for d, a, i in
+                                                         zip(history["dates"], history["amount"], history["idx"])]})
+        if key == "/api/cumulative":
+            day = request.query_params.get("date", "")
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                return error("查询参数无效", "invalid_date", 400)
+            if day not in seed["minutes"]:
+                return error("该日期尚未归档", "not_archived", 404)
+            return response({"provider": source, "date": day, **seed["minutes"][day]})
+        if key == "/api/daily":
+            if not demo:
+                return error("日度数据由后台定时更新", "visitor_collection_disabled", 410)
+            batch = request.query_params.get("batch", "")
+            if not re.fullmatch(r"\d{1,2}", batch) or int(batch) * 8 >= len(seed["universe"]):
+                return error("请选择有效的数据批次", "invalid_batch", 400)
+            offset = int(batch) * 8
+            dates = seed["history"]["dates"][-3:]
+            return response({"provider": source, "dates": dates, "funds": [
+                {"symbol": f["symbol"], "days": {d: {"flow": seed["demo"]["fund_flows"][d].get(f["symbol"])} for d in dates}}
+                for f in seed["universe"][offset:offset + 8]]})
+        if demo:
+            return response(demo_live(seed))
+        entry = cache.load() or {}
+        live = entry.get("value") or seed.get("live_snapshot")
+        if live and live.get("provider") == source and live.get("slots") == seed["minute_slots"] and (
+                allow_replay or not live.get("replay")):
+            try:
+                fetched_at = datetime.fromisoformat(live["fetched_at"].replace("Z", "+00:00"))
+                stale = (datetime.now(timezone.utc) - fetched_at).total_seconds() > 180
+            except (KeyError, TypeError, ValueError):
+                return error("盘中行情时间无效", "cache_not_ready", 503)
+            return response({**live, "cache": {"mode": "background", "collected_at": live["fetched_at"],
+                             "checked_at": entry.get("checked_at"), "stale": stale, "last_error": entry.get("last_error"),
+                             "refresh_seconds": 60}})
+        return error("后台行情尚未就绪；历史图表可继续查看", "cache_not_ready", 503)
+
+    @app.middleware("http")
+    async def headers(request, call_next):
+        result = await call_next(request)
+        result.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin"})
+        return result
+
+    return app
+
+
+app = create_app()
