@@ -5,7 +5,8 @@ export function mergeSnapshot(previous, next) {
   if (!previous) return next;
   if (previous.demo || next.demo || previous.formula !== next.formula || signature(previous) !== signature(next)) throw new Error('Existing snapshot uses different members or formula. Import/review a compatible snapshot before collecting; it was not overwritten.');
   const result = structuredClone(next), union = (a, b) => [...new Set([...a, ...b])].sort();
-  if (!result.live_snapshot && previous.live_snapshot) result.live_snapshot = previous.live_snapshot;
+  const sameMarket = (previous.provider === 'RQData') === (next.provider === 'RQData');
+  if (!result.live_snapshot && previous.live_snapshot && sameMarket) result.live_snapshot = previous.live_snapshot;
   if (previous.core_fund_daily?.date && (!result.core_fund_daily?.date || previous.core_fund_daily.date > result.core_fund_daily.date)) result.core_fund_daily = structuredClone(previous.core_fund_daily);
   result.calendar = union(previous.calendar, next.calendar);
   let kept = 0;
@@ -13,7 +14,10 @@ export function mergeSnapshot(previous, next) {
   const h = result.history = { dates: union(previous.history.dates, next.history.dates), amount: [], idx: [], netflow: [], flow_coverage: [], flow_expected: [] };
   for (const d of h.dates) {
     const oi = oldH.get(d), ni = newH.get(d), useOldFlow = !valid(next.history.netflow[ni]) && valid(previous.history.netflow[oi]);
-    for (const key of ['amount', 'idx', 'netflow']) h[key].push(valid(next.history[key][ni]) ? next.history[key][ni] : previous.history[key][oi] ?? null);
+    for (const key of ['amount', 'idx', 'netflow']) {
+      const allowPrevious = sameMarket || key === 'netflow';
+      h[key].push(valid(next.history[key][ni]) ? next.history[key][ni] : allowPrevious ? previous.history[key][oi] ?? null : null);
+    }
     for (const key of ['flow_coverage', 'flow_expected']) h[key].push(useOldFlow ? previous.history[key][oi] : next.history[key][ni] ?? previous.history[key][oi]);
   }
   const oldB = new Map(previous.broad.dates.map((d, i) => [d, i])), newB = new Map(next.broad.dates.map((d, i) => [d, i]));
@@ -32,14 +36,14 @@ export function mergeSnapshot(previous, next) {
       if (!valid(origin.series[c][ix])) missing.add(c);
     }
     b.total.push(missing.size ? null : b.cats.reduce((sum, c) => sum + b.series[c].at(-1), 0));
-    const issues = [...(next.broad.issues?.[date] || []), ...(previous.broad.issues?.[date] || [])].filter(r => missing.has(r.bucket));
+    const issues = [...(previous.broad.issues?.[date] || []).filter(r => ni === undefined), ...(next.broad.issues?.[date] || [])].filter(r => missing.has(r.bucket));
     if (issues.length) b.issues[date] = [...new Map(issues.map(r => [r.symbol, r])).values()];
   }
-  result.minutes = { ...previous.minutes };
+  result.minutes = sameMarket ? { ...previous.minutes } : {};
   for (const [date, minute] of Object.entries(next.minutes)) if (!minute.quality || !result.minutes[date] || result.minutes[date].quality) result.minutes[date] = minute;
-  result.latest_flow_date = h.dates.filter((d, i) => valid(h.netflow[i])).at(-1);
+  result.latest_flow_date = h.dates.filter((d, i) => valid(h.netflow[i])).at(-1) ?? next.latest_flow_date;
   result.sources = [...new Set([...(previous.sources || []), ...(next.sources || [])])];
-  if (previous.provider === 'FTShare+PublicSources') result.provider = previous.provider;
+  if (sameMarket && previous.provider === 'FTShare+PublicSources') result.provider = previous.provider;
   result.source_audit = { ...result.source_audit, preserved_category_days: kept, previous_snapshot_build: previous.built_at, missing_days: b.dates.filter((d, i) => d <= result.latest_flow_date && b.total[i] === null).length };
   return result;
 }

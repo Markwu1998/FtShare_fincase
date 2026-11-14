@@ -15,6 +15,40 @@ async function replaceLink(path, target) {
   await symlink(target, pending, 'dir');
   try { await rename(pending, path); } finally { await rm(pending, { force: true }); }
 }
+const activeFile = root => resolve(root, '.local/current.json');
+function windowsReleaseTarget(root, target) {
+  const local = resolve(root, '.local');
+  const normalized = relative(local, resolve(local, target)).replaceAll('\\', '/');
+  if (!/^releases\/[\w.-]+$/.test(normalized) || ['.', '..'].includes(normalized.split('/')[1])) {
+    throw new Error('Invalid active release');
+  }
+  return normalized;
+}
+async function activeTarget(root) {
+  if (process.platform === 'win32') {
+    const pointer = await optionalJSON(activeFile(root));
+    if (pointer) {
+      return windowsReleaseTarget(root, pointer.target);
+    }
+  }
+  try {
+    const target = await readlink(resolve(root, '.local/current'));
+    return process.platform === 'win32' ? windowsReleaseTarget(root, target) : target;
+  }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
+export async function activeRelease(root) {
+  const target = await activeTarget(root);
+  return target && resolve(root, '.local', target);
+}
+async function replaceActive(root, target) {
+  if (process.platform !== 'win32') return replaceLink(resolve(root, '.local/current'), target);
+  const path = activeFile(root), pending = path + '.' + randomUUID();
+  try {
+    await writeFile(pending, JSON.stringify({ target: windowsReleaseTarget(root, target) }), { flag: 'wx', mode: 0o600 });
+    await rename(pending, path);
+  } finally { await rm(pending, { force: true }); }
+}
 export async function probeServer(port, expected, attempts = 25) {
   for (let n = 0; n < attempts; n++) {
     try {
@@ -38,7 +72,7 @@ export async function refreshDeployment({ root, env = process.env, collect = tru
   catch (error) { if (error.code === 'EEXIST') throw new Error('Another refresh is running, or refresh.lock needs review after an interrupted run'); throw error; }
   await lock.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
   const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + randomUUID().slice(0, 8);
-  const release = resolve(local, 'releases', id), link = resolve(local, 'current');
+  const release = resolve(local, 'releases', id);
   const seedPath = resolve(root, env.FTSHARE_SEED_FILE || 'data/private/seed.json');
   const stage = resolve(release, 'seed.json');
   let priorLink, previousSeed, changed = false, seedChanged = false;
@@ -70,14 +104,14 @@ export async function refreshDeployment({ root, env = process.env, collect = tru
     } finally { await rm(candidate, { force: true }); }
     const metadata = JSON.parse(await readFile(resolve(release, 'metadata.json'), 'utf8'));
     if (metadata.mode !== mode) throw new Error('Build mode mismatch');
-    try { priorLink = await readlink(link); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    priorLink = await activeTarget(root);
     const installed = manageService ? await optionalJSON(resolve(local, 'macos/installation.json')) : null;
     if (mode === 'live') {
       await mkdir(resolve(local, 'backups'), { recursive: true });
       await writeFile(resolve(local, 'backups', id + '.json'), previousSeed, { mode: 0o600 });
       await cp(stage, seedPath + '.pending'); await rename(seedPath + '.pending', seedPath); seedChanged = true;
     }
-    await replaceLink(link, relative(local, release)); changed = true;
+    await replaceActive(root, relative(local, release)); changed = true;
     if (installed) {
       const start = restart || (() => exec('/bin/launchctl', ['kickstart', '-k', installed.domain + '/' + installed.label]));
       await start(installed);
@@ -88,7 +122,8 @@ export async function refreshDeployment({ root, env = process.env, collect = tru
     return result;
   } catch (error) {
     if (changed) {
-      if (priorLink) await replaceLink(link, priorLink); else await rm(link, { force: true });
+      if (priorLink) await replaceActive(root, priorLink);
+      else await rm(process.platform === 'win32' ? activeFile(root) : resolve(local, 'current'), { force: true });
     }
     if (seedChanged) { await writeFile(seedPath + '.pending', previousSeed, { mode: 0o600 }); await rename(seedPath + '.pending', seedPath); }
     if (changed && priorLink) {
@@ -96,7 +131,7 @@ export async function refreshDeployment({ root, env = process.env, collect = tru
       if (installed) {
         try {
           await (restart || (() => exec('/bin/launchctl', ['kickstart', '-k', installed.domain + '/' + installed.label])))(installed);
-          const prior = JSON.parse(await readFile(resolve(link, 'metadata.json'), 'utf8'));
+          const prior = JSON.parse(await readFile(resolve(local, priorLink, 'metadata.json'), 'utf8'));
           await probe(installed.port, prior.built_at);
         } catch { throw new Error('Refresh failed; old files restored, but the old service restart needs manual inspection'); }
       }

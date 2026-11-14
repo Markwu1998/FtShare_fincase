@@ -7,7 +7,7 @@ on:
         required: false
         type: string
   schedule:
-    # UTC -> Beijing 08:00, 12:30, 18:00. Intraday collection runs in a separate cloud scheduler.
+    # UTC -> Beijing 08:00, 12:30, 18:00. Intraday collection runs on a separate RQData collector host.
     - cron: '0 0,10 * * *'
     - cron: '30 4 * * *'
 permissions:
@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
-      FTSHARE_API_KEY: ${{ secrets.FTSHARE_API_KEY }}
+      RQDATAC_CONF: ${{ secrets.RQDATAC_CONF }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_TEST_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_TEST_ACCOUNT_ID }}
       CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_TEST_PROJECT }}
@@ -34,15 +34,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - uses: actions/cache/restore@v5
+      - uses: actions/setup-python@v6
         with:
-          path: .local/ftshare-cache
-          key: ftshare-raw-v2-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ftshare-raw-v2-
+          python-version: "3.12"
+      - run: python -m pip install rqdatac rqdatac-fund
+      - run: npm ci
       - name: Check configuration
         run: |
-          node -e "for (const k of ['FTSHARE_API_KEY','CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','CLOUDFLARE_PAGES_PROJECT']) if (!process.env[k]) throw new Error('Missing cloud test setting: '+k)"
+          node -e "for (const k of ['RQDATAC_CONF','CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','CLOUDFLARE_PAGES_PROJECT']) if (!process.env[k]) throw new Error('Missing cloud test setting: '+k)"
       - name: Collect, archive and verify restoration
         if: inputs.archive_id == ''
         run: node scripts/cloud-update.mjs update
@@ -58,11 +57,6 @@ jobs:
       - name: Write run summary
         if: always()
         run: node scripts/cloud-summary.mjs
-      - uses: actions/cache/save@v5
-        if: always()
-        with:
-          path: .local/ftshare-cache
-          key: ftshare-raw-v2-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save verified test publication
         uses: actions/upload-artifact@v6
         with:

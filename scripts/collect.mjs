@@ -7,14 +7,19 @@ import { collectSnapshot } from './lib/collect.mjs';
 import { validateSeed } from './lib/seed.mjs';
 import { recentCollection } from './lib/recent-collection.mjs';
 import { mergeSnapshot } from './lib/merge-snapshot.mjs';
+import { marketProvider, rqdataMarket } from './lib/rqdata-market.mjs';
 
 if (process.argv.includes('--help')) {
-  console.log('npm run collect -- [--end YYYY-MM-DD] [--recent]\nReads config/universe.json and config/collection.json. Requires your own FtShare key. Writes ignored data/private/seed.json only after validation.');
+  console.log('npm run collect -- [--end YYYY-MM-DD] [--recent]\nReads config/universe.json, config/collection.json and optional MARKET_DATA_CONFIG_FILE. Writes the snapshot only after validation.');
 } else {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const read = async path => JSON.parse(await readFile(resolve(root, path), 'utf8'));
   async function optional(path, fallback) { try { return await read(path); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } }
+  const provider = await marketProvider();
   let config = await read('config/collection.json');
+  config = { ...config, fund_history: provider === 'RQData', ...(
+    process.env.MARKET_DATA_CONFIG_FILE ? await read(process.env.MARKET_DATA_CONFIG_FILE) : {}
+  ), provider };
   const universe = await read('config/universe.json');
   const path = resolve(root, process.env.FTSHARE_SEED_FILE || 'data/private/seed.json');
   const previous = await optional(path, null);
@@ -26,11 +31,11 @@ if (process.argv.includes('--help')) {
   const supplement = await optional('data/private/public-shares.json', { rows: [] });
   const events = await optional('data/private/flow-recoveries.json', { funds: {} });
   if (!Array.isArray(supplement.rows)) throw new Error('public-shares.json must contain rows');
-  const client = await collectorClient();
+  const client = provider === 'FTShare' ? await collectorClient() : null;
   const recoveries = { ...Object.fromEntries((previous?.universe || []).filter(f => f.flow_evidence).map(f => [f.symbol, f.flow_evidence])), ...events.funds };
-  const fresh = await collectSnapshot({ config, universe, client, end, publicShares: supplement.rows, recoveries, progress: console.log });
+  const fresh = await collectSnapshot({ config, universe, client, market: provider === 'RQData' ? rqdataMarket : undefined, end, publicShares: supplement.rows, recoveries, progress: console.log });
   const seed = validateSeed(mergeSnapshot(previous, fresh), 'live');
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path + '.tmp', JSON.stringify(seed) + '\n'); await rename(path + '.tmp', path);
-  console.log(JSON.stringify({ collected_through: seed.latest_flow_date, funds: seed.universe.length, broad_days: seed.broad.dates.length, incomplete_days: seed.source_audit.missing_days, ...client.stats() }));
+  console.log(JSON.stringify({ provider: seed.provider, market_through: seed.latest_market_date, collected_through: seed.latest_flow_date, funds: seed.universe.length, broad_days: seed.broad.dates.length, incomplete_days: seed.source_audit.missing_days, ...client?.stats() }));
 }

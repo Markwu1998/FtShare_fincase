@@ -1,6 +1,5 @@
 import { fundStartDate, cumulativeWindow, cumulativeExcess, FLOW_ISSUE_LABELS } from './flow-math.js';
 import { createRadar } from './radar.js';
-/* FtShare data service. Historical provenance remains in the stored snapshot. */
 (async function(){
 'use strict';
 const $=id=>document.getElementById(id), charts={}, colors={red:'#d93630',green:'#0aa06e',blue:'#4c7bf3',orange:'#e8862e'};
@@ -14,13 +13,25 @@ const cst=()=>seed?.demo?seed.demo.as_of+'T15:00:00.000Z':new Date(Date.now()+8*
 const storageKey=key=>'ftshare-oss:'+document.documentElement.dataset.dataMode+':'+key;
 let broadSelection=null,broadResetZoom=false,broadRangeInitialized=false;
 let seed,live,loading=false,remaining=1,picked='',brushLoaded=false;
-async function get(path){const r=await fetch(path,{cache:'default',signal:AbortSignal.timeout(30000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources'].includes(d.provider))throw new Error('数据来源校验失败');return d;}
+async function get(path){const r=await fetch(path,{cache:'default',signal:AbortSignal.timeout(30000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources','RQData'].includes(d.provider))throw new Error('数据来源校验失败');return d;}
+function matchingLive(value){
+ const provider=seed.provider==='FTShare+PublicSources'?'FTShare':seed.provider;
+ return value?.provider===provider&&value.slots?.length===seed.minute_slots.length&&value.slots.every((slot,i)=>slot===seed.minute_slots[i]);
+}
+function renderSource(){
+ const rq=seed.provider==='RQData';
+ const text=seed.demo?'演示数据：程序生成的行情与资金样本。':rq
+   ?'行情：RQData。'+(seed.source_audit?.fund_provider==='RQData'?'净申赎按 RQData 份额与单位净值估算。':seed.latest_flow_date?'净申赎数据沿用既有归档。':'日度份额与净值待接入。')
+   :'历史归档：'+seed.provider+'。净申赎估算按交易日期对齐。';
+ document.querySelectorAll('footer').forEach(e=>e.textContent=text);
+ document.querySelectorAll('.chart-source').forEach(e=>e.hidden=!rq);
+}
 function tag(id,text,kind=''){const e=$(id);if(e){e.textContent=text;e.className='tag '+kind;}}
 function saved(key){try{return JSON.parse(localStorage.getItem(storageKey(key))||'null');}catch{return null;}}
 function save(key,value){try{localStorage.setItem(storageKey(key),JSON.stringify(value));}catch{}}
 function safely(label,job){try{return job();}catch(error){console.error(label+'暂不可用');return null;}}
 function combineLive(next,prior){
- if(!prior||next.date!==prior.date)return next;
+ if(!prior||next.date!==prior.date||next.provider!==prior.provider||Boolean(next.replay)!==Boolean(prior.replay))return next;
  next.bars=next.bars.map((v,i)=>{if(finite(v))return v;if(finite(prior.bars?.[i])&&prior.coverage?.[i]===20){next.coverage[i]=20;return prior.bars[i];}return null;});
  next.closes=next.closes.map((v,i)=>finite(v)?v:prior.closes?.[i]??null);
  const old=new Map((prior.table||[]).map(r=>[r.symbol,r]));
@@ -49,12 +60,23 @@ function styleChart(option){
  return option;
 }
 function renderOverview(){
- if(!seed)return;const b=seed.broad,idx=b.dates.map((d,i)=>i).filter(i=>b.dates[i]<=seed.latest_flow_date).at(-1);if(idx===undefined)return;
- const date=b.dates[idx],year=date.slice(0,4),ids=b.dates.map((d,i)=>i).filter(i=>b.dates[i].startsWith(year)&&b.dates[i]<=date),annual=cumulativeWindow(ids.map(i=>b.dates[i]),ids.map(i=>b.total[i])).values.at(-1);
+ if(!seed)return;
  const put=(id,value,signed=false)=>{const e=$(id);if(!e)return;e.innerHTML=(finite(value)?(signed?sign(value,1):fmt(value,1)):'—')+'<small>亿元</small>';e.className=finite(value)&&signed?(value>0?'positive':value<0?'negative':''):'';};
- put('overviewAmount',live?.amount);put('overviewFlow',b.total[idx],true);put('overviewYear',annual,true);
- $('overviewAmountDate').textContent=live?live.date+' · 20只核心 ETF':'等待当日行情';$('overviewFlowDate').textContent=date+' · 宽基 ETF';$('overviewYearLabel').textContent=year+'年宽基累计';$('overviewYearDate').textContent='年初至 '+date;
- const expected=b.cats.reduce((n,c)=>n+b.coverage[c].expected[idx],0);$('overviewCoverage').textContent=expected;$('overviewCoverageNote').textContent=b.cats.length+'类宽基指数 · 已上市成员';
+ const b=seed.broad,h=seed.history,lastMarket=h.amount.findLastIndex(finite);
+ const amount=finite(live?.amount)?live.amount:h.amount[lastMarket];
+ const amountDate=finite(live?.amount)?live.date:h.dates[lastMarket];
+ put('overviewAmount',amount);
+ $('overviewAmountDate').textContent=amountDate?amountDate+' · 20只核心 ETF':'等待当日行情';
+ const memberDate=live?.date||seed.latest_market_date||b.dates.at(-1);
+ const expected=seed.universe.filter(f=>fundStartDate(f)<=memberDate).length;
+ $('overviewCoverage').textContent=expected;$('overviewCoverageNote').textContent=b.cats.length+'类宽基指数 · 已上市成员';
+ const idx=b.total.findLastIndex(finite);
+ const date=b.dates[idx],year=date?.slice(0,4),ids=b.dates.map((d,i)=>i).filter(i=>year&&b.dates[i].startsWith(year)&&b.dates[i]<=date);
+ const annual=ids.length?cumulativeWindow(ids.map(i=>b.dates[i]),ids.map(i=>b.total[i])).values.at(-1):null;
+ put('overviewFlow',b.total[idx],true);put('overviewYear',annual,true);
+ $('overviewFlowDate').textContent=date?date+' · 宽基 ETF':'等待日度数据';
+ $('overviewYearLabel').textContent=year?year+'年宽基累计':'宽基年度累计';
+ $('overviewYearDate').textContent=date?'年初至 '+date:'等待日度数据';
 }
 function base(title,dates,yName='亿元'){
  return {animation:false,title:{text:title,left:8,top:6,padding:0,textStyle:{fontSize:14}},grid:{top:100,left:16,right:16,bottom:54,containLabel:true},legend:{top:40,left:'center',type:'scroll'},tooltip:{trigger:'axis',confine:true,formatter:ps=>[ps[0]?.axisValue,...ps.map(p=>escape(p.seriesName)+'：'+sign(p.value,2))].join('<br>')},xAxis:{type:'category',data:dates,axisLabel:{hideOverlap:true}},yAxis:{type:'value',name:yName,scale:true},dataZoom:[{type:'inside',moveOnMouseMove:false},{type:'slider',height:16,bottom:12}],series:[]};
@@ -113,7 +135,7 @@ function renderCases(){
 }
 function renderBroad(){
  const b=seed.broad,available=b.dates.map((d,i)=>i).filter(i=>b.dates[i]<=seed.latest_flow_date);
- if(!available.length)return;
+ if(!available.length){tag('tagBroad','日度份额与净值待发布','warn');$('broadCumulativeNote').textContent='日度份额与净值待发布';return;}
  const first=b.dates[available[0]],lastDate=b.dates[available.at(-1)];
  if(!broadRangeInitialized){broadRangeInitialized=true;broadSelection=null;}
  const years=[...new Set(available.map(i=>b.dates[i].slice(0,4)))];
@@ -177,19 +199,23 @@ function historyIndex(date){
  h.dates.splice(i,0,date);for(const k of ['amount','idx','netflow'])h[k].splice(i,0,null);h.flow_coverage.splice(i,0,0);h.flow_expected.splice(i,0,20);return i;
 }
 function mergeLiveHistory(){
- if(!live)return;const h=seed.history,i=historyIndex(live.date),index=live.closes.filter(finite).at(-1)??null;
+ if(!live||(live.provider==='RQData'&&live.date<=seed.latest_market_date))return;const h=seed.history,i=historyIndex(live.date),index=live.closes.filter(finite).at(-1)??null;
  h.amount[i]=live.amount;h.idx[i]=index;
  if(live.bars.every(finite))seed.minutes[live.date]={bars:live.bars,cumulative:live.cumulative};
 }
 function renderCloudStatus(){
  const e=$('cloudUpdateStatus');e.hidden=false;const date=seed.cloud_update?.collected_at;
- e.textContent='日度数据每日 08:00 / 12:30 / 18:00 更新；盘中行情每分钟统一采集。'+(date?' 最近成功归档：'+new Date(date).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'');
+ e.textContent='日度数据随后台快照更新，盘中行情约每分钟读取一次缓存。'+(date?' 最近成功归档：'+new Date(date).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'');
 }
 async function refresh(){
  if(loading)return;loading=true;
  try{
-  if(!seed.demo){const health=await get('/api/health');if(health.history_built_at!==seed.built_at){seed=await get('/api/board');save('ftshare-board-v1',seed);renderCloudStatus();renderDaily();for(const d of Object.keys(seed.minutes).sort().reverse())if(!$('cumDate').querySelector('option[value="'+d+'"]')){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').insertBefore(op,$('cumDate').options[1]||null);}}}
-  live=combineLive(await get('/api/live'),live);save('ftshare-last-live-v1',live);safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);safely('日度图表',renderDaily);if(radar)safely('异动雷达',()=>radar.render(seed,live));
+  if(!seed.demo){const health=await get('/api/health');if(health.history_built_at!==seed.built_at){seed=await get('/api/board');if(!matchingLive(live))live=null;save('ftshare-board-v1',seed);renderSource();renderCloudStatus();renderDaily();for(const d of Object.keys(seed.minutes).sort().reverse())if(!$('cumDate').querySelector('option[value="'+d+'"]')){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').insertBefore(op,$('cumDate').options[1]||null);}}}
+  const next=await get('/api/live');
+  if(!matchingLive(next))throw new Error('行情与历史快照口径不一致');
+  live=combineLive(next,live);if(!live.replay)save('ftshare-last-live-v1',live);safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);safely('日度图表',renderDaily);if(radar)safely('异动雷达',()=>radar.render(seed,live));
+  if(live.replay)tag('tagUpdate','历史回放 '+live.date+' '+live.last_complete_minute,'warn');
+  else if(live.provider==='RQData'&&live.cache?.stale)tag('tagUpdate','行情已陈旧 · '+live.date+' '+live.last_complete_minute,'warn');
   if(live.cache?.last_error&&live.cache.last_error!=='partial_upstream')tag('tagUpdate','云端采集暂缓；行情保留至 '+live.date+' '+(live.last_complete_minute||'--'),'warn');
  }catch(e){tag('tagUpdate',live?'缓存读取暂缓；保留 '+live.date+' '+(live.last_complete_minute||'')+' 的成功数据':'后台行情尚未就绪；历史图表可继续查看','warn');}
  finally{loading=false;}
@@ -202,9 +228,8 @@ function tick(){
 window.addEventListener('ftshare:theme-change',()=>{if(!seed)return;safely('主题切换',renderDaily);if(live)safely('实时图表',renderMinute);safely('累计图表',renderCum);});
 try{
  try{seed=await get('/api/board');save('ftshare-board-v1',seed);}catch(error){seed=saved('ftshare-board-v1');if(!seed?.broad||!seed?.history)throw error;tag('tagUpdate','正在显示上次成功加载的历史数据','warn');}
- const sourceDescription=seed.demo?'演示数据：程序生成的行情与资金样本。':'数据服务：FtShare。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。';
- document.querySelectorAll('footer').forEach(e=>e.textContent=sourceDescription);
- const sourceNote=document.querySelector('#sourcePolicy');if(sourceNote)sourceNote.textContent=seed.demo?'离线生成的固定样本，不调用FtShare；上方接口说明用于真实数据接入。':'行情由云端统一采集，访客只读取共享缓存；日度数据按后台计划归档，成员及分类使用配置快照。';
+ renderSource();
+ const sourceNote=document.querySelector('#sourcePolicy');if(sourceNote)sourceNote.textContent=seed.demo?'离线生成的演示样本。':'网页读取后台发布的历史快照和盘中缓存，成员及分类使用项目配置。';
  renderCloudStatus();
  if(!$('etfTable').innerHTML)$('etfTable').innerHTML=seed.universe.filter(f=>f.is_core_basket).map(f=>'<tr><td>'+escape(f.symbol.slice(0,6))+'</td><td>'+escape(f.name)+'</td><td class="num">--</td><td class="num">--</td><td class="num">--</td></tr>').join('');
  $('universeText').textContent='宽基分类：'+seed.universe.length+'只ETF，按当前跟踪指数分组回溯（含增强ETF），从上市日起纳入。累计遇缺失日停止，日期与原因可展开查看。';
@@ -212,7 +237,7 @@ try{
  $('broadAll').addEventListener('click',()=>{broadResetZoom=true;broadSelection=null;renderBroad();});
  $('broadRecent').addEventListener('click',()=>{const b=seed.broad,ids=b.dates.map((d,i)=>i).filter(i=>b.dates[i]<=seed.latest_flow_date&&b.dates[i]>=$('broadStart').value&&b.dates[i]<=$('broadEnd').value);const range=cumulativeWindow(ids.map(i=>b.dates[i]),ids.map(i=>b.total[i])).lastCompleteRange;if(range){broadResetZoom=true;broadSelection=range;renderBroad();}});
  safely('历史图表',renderDaily);safely('累计成交图表',renderCum);
- const lastLive=saved('ftshare-last-live-v1');if(lastLive?.provider===(seed.demo?'Demo':'FTShare')&&lastLive?.slots?.length===seed.minute_slots.length){live=lastLive;safely('已保存行情',renderMinute);tag('tagUpdate','已保存行情 '+live.date+' '+(live.last_complete_minute||'')+'；正在更新','warn');}
+ const lastLive=saved('ftshare-last-live-v1');if(matchingLive(lastLive)){live=lastLive;safely('已保存行情',renderMinute);tag('tagUpdate','已保存行情 '+live.date+' '+(live.last_complete_minute||'')+'；正在更新','warn');}
  const dates=Object.keys(seed.minutes).sort().reverse();for(const d of dates){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').appendChild(op);}picked=dates[0]||'';$('cumDate').value=picked;renderCum();
  $('cumDate').addEventListener('change',async()=>{picked=$('cumDate').value;if(picked&&!seed.minutes[picked]){try{seed.minutes[picked]=await get('/api/cumulative?date='+picked);}catch(e){tag('tagUpdate',e.message,'warn');}}renderCum();});
  window.addEventListener('resize',()=>Object.values(charts).forEach(c=>c.resize()));

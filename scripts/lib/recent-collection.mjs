@@ -5,5 +5,5 @@ export function recentCollection(config, previous, end) {
   const anchor = last < end ? last : end;
   const start = new Date(Date.parse(anchor + 'T00:00:00Z') - 14 * 86400000).toISOString().slice(0, 10);
   return { ...config, flow_start: start > config.flow_start ? start : config.flow_start,
-    market_start: start > config.market_start ? start : config.market_start };
+    market_start: config.provider === 'RQData' ? config.market_start : start > config.market_start ? start : config.market_start };
 }

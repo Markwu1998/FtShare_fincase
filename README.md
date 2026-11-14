@@ -1,12 +1,12 @@
-# FtShare · ETF 资金观测台
+# RQData · ETF 资金观测台
 
 **发现成交异动，跟踪宽基资金，从盘中观察到盘后复盘。**
 
-**数据服务：FtShare**
+**数据服务：RQData**
 
 面向 A股 ETF 投资者与研究者，将成交雷达、盘中行情、历史对照和日度净申赎估算汇集在同一页面。
 
-[在线体验](https://etf.jtxaionline.com/#radar) · [部署自己的看板](#部署自己的看板) · [了解 FtShare](https://ftai.chat/ftshare)
+[本地启动与回放](docs/rqdata-market.md) · [RQData 官方文档](https://www.ricequant.com/doc/rqdata/python/index-rqdatac)
 
 **v0.1.0 · ETF异动雷达 · 20／60日双基准 · 20只核心ETF · 12类宽基 · 9张分析图表**
 
@@ -49,10 +49,9 @@
 
 ## 部署自己的看板
 
-1. [获取 FtShare API Key](https://ftai.chat/me/profile)。
-2. 按 [部署指南](docs/deployment.md) 配置数据、后台采集与网页服务。
+实盘模式需要具备相应权限的 RQData 账号，以及安装了 `rqdatac` 和 `rqdatac-fund` 的 Python 环境。后台采集器生成历史快照和盘中缓存，网页只读取发布结果。
 
-推荐云端方案：**Cloudflare Pages + 采集Worker + 共享缓存**。Key配置在采集端，网页与雷达读取共享数据；盘中每分钟采集，日度任务按北京时间08:00、12:30、18:00运行。[云端配置](docs/cloud-scheduled-update.md)
+[本地启动与回放](docs/rqdata-market.md) · [部署说明](docs/deployment.md) · [上游模块迁移对照](docs/market-data-provider-audit.md)
 
 ## 本地体验
 
@@ -66,12 +65,6 @@ npm run dev
 
 打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)，使用内置演示数据。在`.env`设置`ENABLE_RADAR=1`后重新运行，可体验异动雷达。
 
-## FtShare 金融数据服务
-
-本项目是 **FtShare** 的开源金融应用案例，由 ETF 行情、基金份额、净值和交易日历接口驱动。
-
-FtShare 为 AI Agent、量化研究和金融应用提供数据服务，支持 [Python SDK](https://github.com/FTShare-Lab/FTShare-python-sdk)、[MCP](https://github.com/FTShare-Lab/FTShare-MCP) 和 [Skill](https://github.com/FTShare-Lab/FTShare-skill)，可用于构建自己的分析工具与金融应用。
-
-[数据接口](https://market.ft.tech/gateway/doc/) · [数据与计算](docs/data.md) · [其他部署方式](docs/deployment.md) · [参与开发](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
+[图表接口](docs/chart-interfaces.md) · [数据与计算](docs/data.md) · [参与开发](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 
 [MIT 开源许可](LICENSE) · [第三方许可](THIRD_PARTY_NOTICES.md)

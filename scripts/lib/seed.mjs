@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { BASKET, CATEGORIES, FORMULA, SLOTS } from '../../src/server/model.js';
+import { BASKET, CATEGORIES, FORMULA, RQDATA_SLOTS, SLOTS } from '../../src/server/model.js';
 
 const number = value => value === null || typeof value === 'number' && Number.isFinite(value);
 function dates(values, label) {
@@ -13,10 +13,11 @@ export function validateSeed(seed, mode) {
   assert.equal(seed.schema, 1, 'Unsupported seed schema');
   assert(['demo', 'live'].includes(mode), 'DATA_MODE must be demo or live');
   assert.equal(Boolean(seed.demo), mode === 'demo', 'Demo and live data cannot be mixed');
-  assert(mode === 'demo' ? seed.provider === 'Demo' : ['FTShare', 'FTShare+PublicSources'].includes(seed.provider), 'Unexpected data provider');
+  assert(mode === 'demo' ? seed.provider === 'Demo' : ['FTShare', 'FTShare+PublicSources', 'RQData'].includes(seed.provider), 'Unexpected data provider');
   assert.equal(seed.formula, FORMULA, 'Snapshot must use this release\'s exchange alignment and event policy');
   assert.deepEqual(seed.categories, CATEGORIES, 'Category order must match the model');
-  assert.deepEqual(seed.minute_slots, SLOTS, 'Minute slots must match the trading session');
+  const slots = seed.provider === 'RQData' ? RQDATA_SLOTS : SLOTS;
+  assert.deepEqual(seed.minute_slots, slots, 'Minute slots must match the trading session');
   assert(Array.isArray(seed.universe) && seed.universe.length >= 20, 'Missing ETF universe');
   assert.equal(new Set(seed.universe.map(f => f.symbol)).size, seed.universe.length, 'Duplicate ETF symbols');
   assert(BASKET.every(s => seed.universe.some(f => f.symbol === s && f.is_core_basket)), 'All 20 core ETFs are required');
@@ -48,10 +49,13 @@ export function validateSeed(seed, mode) {
     if (v.some(x => x === null)) assert.equal(broad.total[i], null, 'Incomplete total must be null');
     else assert(broad.total[i] !== null && Math.abs(v.reduce((a, b) => a + b, 0) - broad.total[i]) < 1e-6, 'Category totals do not reconcile');
   });
-  assert(broad.dates.includes(seed.latest_flow_date), 'Latest flow date must belong to broad history');
+  assert(broad.dates.includes(seed.latest_flow_date) ||
+    (seed.provider === 'RQData' && seed.latest_flow_date === null && seed.core_fund_daily === null &&
+      seed.history.netflow.every(v => v === null) && broad.total.every(v => v === null)),
+  'Latest flow date must belong to broad history');
   assert(seed.minutes && typeof seed.minutes === 'object', 'Missing minute samples');
   for (const minute of Object.values(seed.minutes)) {
-    values(minute.bars, SLOTS.length, 'minute.bars'); values(minute.cumulative, SLOTS.length, 'minute.cumulative');
+    values(minute.bars, slots.length, 'minute.bars'); values(minute.cumulative, slots.length, 'minute.cumulative');
     let sum = 0, missing = false;
     minute.bars.forEach((v, i) => {
       if (v === null) missing = true;

@@ -1,10 +1,9 @@
 // Only fixed data routes are public. Credentials never enter assets or responses.
-import { createDataService } from './server/service.js';
 import { createDemoService } from './server/demo.js';
 import { createReadOnlyService, UPDATE_POLICY } from './server/read-only.js';
 export function createGateway({ assets = typeof ASSETS === "undefined" ? {} : ASSETS, seed = typeof SEED === "undefined" ? undefined : SEED, service } = {}) {
   const data = service || (seed.demo ? createDemoService(seed) : createReadOnlyService(seed));
-  const json = (value, status=200) => new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','x-data-provider':value.provider||'FTShare'}});
+  const json = (value, status=200) => new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','x-data-provider':value.provider||seed.provider}});
   return {async fetch(request,env={},ctx={}){
     const url=new URL(request.url),path=url.pathname;
     if(request.method!=='GET'&&request.method!=='HEAD')return new Response('Method not allowed',{status:405});
@@ -37,7 +36,7 @@ export function createGateway({ assets = typeof ASSETS === "undefined" ? {} : AS
       if(error.message==='Invalid date'||error.message==='Invalid batch')return json({error:'查询参数无效'},400);
       if(error.code==='not_archived')return json({error:'该日期尚未归档',code:'not_archived'},404);
       if(error.code==='cache_not_ready')return json({error:'后台行情尚未就绪；历史图表可继续查看',code:'cache_not_ready'},503);
-      return json({error:error.code==='not_configured'?'数据服务尚未配置':error.code==='quota_exceeded'?'FtShare调用额度暂不可用，稍后重试':error.code==='truncated'?'本次数据不完整，稍后重试':'FtShare数据暂不可用，请稍后刷新',code:error.code||'upstream_error'},503);
+      return json({error:error.code==='not_configured'?'数据服务尚未配置':error.code==='quota_exceeded'?'行情额度暂不可用，稍后重试':error.code==='truncated'?'本次数据不完整，稍后重试':'数据暂不可用，请稍后刷新',code:error.code||'upstream_error'},503);
     }
   }};
 }

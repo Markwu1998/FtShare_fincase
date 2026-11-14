@@ -73,12 +73,9 @@ test('shared edge cache normalizes force-query parameters without extra storage 
   }finally{globalThis.caches=old;}
 });
 
-test('Cloudflare cron names weekdays explicitly so Friday is not lost to its Sunday=1 convention', async () => {
+test('legacy Cloudflare collector is unscheduled and the collector clock handles weekdays', async () => {
   const config=JSON.parse(await readFile(new URL('../config/intraday-worker.example.jsonc',import.meta.url),'utf8'));
-  assert.equal(config.triggers.crons.length,1);
-  const fields=config.triggers.crons[0].split(/\s+/);
-  assert.equal(fields[4],'MON-FRI','Cloudflare numeric 1-5 excludes Friday; use explicit weekday names');
-  assert.equal(fields[1],'1-3,5-7','Keep the existing UTC session hours');
+  assert.deepEqual(config.triggers.crons,[]);
   for(const [date,allowed]of [['2026-11-13',true],['2026-11-16',true],['2026-11-14',false],['2026-11-15',false]])
     assert.equal(tradingMinute(Date.parse(date+'T10:00:00+08:00')),allowed,date);
 });

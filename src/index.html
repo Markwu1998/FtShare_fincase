@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FtShare · ETF资金观测台</title>
+<title>RQData · ETF资金观测台</title>
 
 <meta name="theme-color" content="#f2f6f6">
 <script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
@@ -28,14 +28,14 @@
 <div class="wrap">
   <header class="top" id="top">
     <div class="top-line">
-      <a class="brand" href="#top" aria-label="FtShare ETF资金观测台首页"><img class="brand-icon" src="/assets/ftai-mark.svg" alt="" aria-hidden="true" width="34" height="34"><span>FtShare<span class="brand-product">ETF FLOW</span></span></a>
+      <a class="brand" href="#top" aria-label="RQData ETF资金观测台首页"><span>RQData<span class="brand-product">ETF FLOW</span></span></a>
       <div class="header-actions">
         <div class="theme-switch" role="group" aria-label="切换主题">
           <button type="button" data-theme-choice="light" aria-label="浅色主题" aria-pressed="false" title="浅色主题"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
           <button type="button" data-theme-choice="dark" aria-label="深色主题" aria-pressed="false" title="深色主题"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 13A8.8 8.8 0 0 1 11 3.2 8.8 8.8 0 1 0 20.8 13Z"/></svg></button>
           <button type="button" data-theme-choice="system" aria-label="跟随系统主题" aria-pressed="true" title="跟随系统主题"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></button>
         </div>
-        <a class="official-link" href="https://ftai.chat/ftshare" target="_blank" rel="noopener noreferrer">即刻体验 FtShare <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></a>
+        <a class="official-link" href="https://www.ricequant.com/doc/rqdata/python/index-rqdatac" target="_blank" rel="noopener noreferrer">RQData 文档 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></a>
       </div>
     </div>
     <div class="hero-heading"><div><p class="eyebrow">ETF MARKET OBSERVATORY</p><h1>ETF 资金观测台<span class="title-dot">.</span></h1></div><span class="market-label"><i></i>中国市场 · 沪深 ETF</span></div>
@@ -64,29 +64,21 @@
     </div>
     <section class="chart-wrap"><div id="chart"></div>
       <details class="chart-source" data-source-for="chart">
-        <summary><span class="source-label">FtShare接口</span> · ETF与指数实时分钟行情<span class="source-action">查看详情</span></summary>
-        <div class="source-content">
-          <dl>
-            <div class="source-item"><dt>柱状图：20只ETF每分钟成交额</dt><dd><code>ft_v4_stock_realtime_minute_kline</code> / <code>ft_v4_etf_realtime_minute_kline</code><span>ETF实时分钟行情 · turnover、ts_millis、symbol</span></dd></div>
-            <div class="source-item"><dt>折线：上证综指分钟点位</dt><dd><code>ft_v4_index_realtime_minute_kline</code><span>上证综指实时分钟行情 · close、ts_millis；symbol=000001.SH</span></dd></div>
-            <div class="source-item"><dt>虚线：上证综指上一交易日收盘点位</dt><dd><code>ft_v1_index_candlesticks</code><span>上证综指历史日线 · close；symbol=000001.SH；interval_unit=Day</span></dd></div>
-          </dl>
-          <p>ETF分钟成交额合计后由元换算为亿元。</p>
-        </div>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
+        <div class="source-content"><dl>
+          <div class="source-item"><dt>ETF与指数分钟 K 线</dt><dd><code>rqdatac.get_price(frequency="1m")</code><span>ETF使用 total_turnover，上证综指 000001.XSHG 使用 close。</span></dd></div>
+          <div class="source-item"><dt>指数上一交易日收盘</dt><dd><code>rqdatac.get_price(frequency="1d")</code><span>取不复权 close。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     <section class="chart-wrap">
       <div class="cum-pick"><select id="cumDate"><option value="">选择对比日期</option></select></div>
       <div class="chart" id="chartCum"></div>
       <details class="chart-source" data-source-for="chartCum">
-        <summary><span class="source-label">FtShare接口</span> · 当日与历史ETF分钟行情<span class="source-action">查看详情</span></summary>
-        <div class="source-content">
-          <dl>
-            <div class="source-item"><dt>当日累计曲线</dt><dd><code>ft_v4_stock_realtime_minute_kline</code> / <code>ft_v4_etf_realtime_minute_kline</code><span>ETF实时分钟行情 · turnover、ts_millis、symbol</span></dd></div>
-            <div class="source-item"><dt>所选历史日及近20个完整交易日的累计曲线</dt><dd><code>ft_v2_etf_minutes_batch</code><span>ETF历史分钟行情 · turnover、ts_millis；interval_value=1</span></dd></div>
-          </dl>
-          <p>分钟成交额按时间累加；历史均值使用最近20个交易日中数据完整的日期。</p>
-        </div>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
+        <div class="source-content"><dl>
+          <div class="source-item"><dt>当日、历史与近20日分钟累计</dt><dd><code>rqdatac.get_price(frequency="1m")</code><span>使用 total_turnover，按 240 个分钟点对齐，缺失分钟停止累计。</span></dd></div>
+        </dl></div>
       </details>
 
     </section>
@@ -95,26 +87,20 @@
     <div class="comparison-grid">
     <section class="chart-wrap"><div class="chart" id="chartTypCase"></div>
       <details class="chart-source" data-source-for="chartTypCase">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>紫线：今日20只ETF每分钟成交额合计</dt><dd><code>ft_v4_stock_realtime_minute_kline</code> / <code>ft_v4_etf_realtime_minute_kline</code><span>ETF实时分钟行情 · turnover、ts_millis、symbol；与顶部分钟行情共用请求</span></dd></div>
-          <div class="source-item"><dt>放量日与常态日的分钟成交额样本</dt><dd><code>ft_v2_etf_minutes_batch</code><span>ETF历史分钟行情 · turnover、ts_millis；interval_value=1</span></dd></div>
-          <div class="source-item"><dt>确定每日净申购估算所需份额</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>确定每日净申购估算所需净值</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date</span></dd></div>
-
-        </dl><p>红色柱形为历史放量日分钟成交额均值；紫线为今日20只ETF分钟成交额，使用左轴亿元/分钟，随盘中行情每60秒刷新。橙线为放量日与常态日均值之差逐分钟累计，单位亿元，对应右轴。历史均值仅使用今日之前的完整分钟与资金样本；放量日按净申购估算超过100亿元筛选，沿用案例日期排除规则。 份额与净值按交易日期对齐，净申赎金额按统一口径估算。</p></div>
+          <div class="source-item"><dt>盘中与历史分钟成交额</dt><dd><code>rqdatac.get_price(frequency="1m")</code><span>使用 total_turnover。</span></dd></div>
+          <div class="source-item"><dt>放量日判定</dt><dd><code>fund.get_daily_units / fund.get_nav</code><span>用日度份额变化和单位净值估算净申购。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     <section class="chart-wrap"><div class="chart" id="chartTypNorm"></div>
       <details class="chart-source" data-source-for="chartTypNorm">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>紫线：今日20只ETF每分钟成交额合计</dt><dd><code>ft_v4_stock_realtime_minute_kline</code> / <code>ft_v4_etf_realtime_minute_kline</code><span>ETF实时分钟行情 · turnover、ts_millis、symbol；与顶部分钟行情共用请求</span></dd></div>
-          <div class="source-item"><dt>常态日与放量日的分钟成交额样本</dt><dd><code>ft_v2_etf_minutes_batch</code><span>ETF历史分钟行情 · turnover、ts_millis；interval_value=1</span></dd></div>
-          <div class="source-item"><dt>确定每日净申购估算所需份额</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>确定每日净申购估算所需净值</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date</span></dd></div>
-
-        </dl><p>蓝色柱形为历史常态日分钟成交额均值；紫线为今日20只ETF分钟成交额，两者均使用左轴亿元/分钟。常态日使用今日之前净申购估算不超过100亿元的完整样本；今日未发生或数据不完整的分钟留空，跨日未取得当日行情时不把旧数据标作今日。 份额与净值按交易日期对齐，净申赎金额按统一口径估算。</p></div>
+          <div class="source-item"><dt>常态日分钟成交额</dt><dd><code>rqdatac.get_price(frequency="1m")</code><span>使用 total_turnover。</span></dd></div>
+          <div class="source-item"><dt>常态日判定</dt><dd><code>fund.get_daily_units / fund.get_nav</code><span>按日度净申购估算筛选。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     </div>
@@ -130,20 +116,17 @@
         </table>
       </div>
       <details class="chart-source" data-source-for="etfTable">
-        <summary><span class="source-label">FtShare接口</span> · 实时日行情、历史日线与基础信息<span class="source-action">查看详情</span></summary>
-        <div class="source-content">
-          <dl>
-            <div class="source-item"><dt>当日成交额与最新价格</dt><dd><code>ft_v4_stock_realtime_day_kline</code> / <code>ft_v4_etf_realtime_day_kline</code><span>ETF当日行情 · close、turnover、symbol</span></dd></div>
-            <div class="source-item"><dt>上一交易日收盘价，用于计算涨跌幅</dt><dd><code>ft_v2_etf_candlesticks_batch</code><span>ETF历史日成交额 / 前收盘 · turnover、close；interval_unit=Day</span></dd></div>
-            <div class="source-item"><dt>基金代码与名称</dt><dd><code>ft_v2_etf_description_all</code><span>ETF名称与跟踪指数 · symbol、name、tracking_index_id、tracking_index_symbol、inception_date；分类名单使用已采集的版本快照</span></dd></div>
-          </dl>
-          <p>成交额占比由各基金成交额占篮子总额计算。</p>
-        </div>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
+        <div class="source-content"><dl>
+          <div class="source-item"><dt>最新价与当日累计成交额</dt><dd><code>rqdatac.current_snapshot</code><span>使用 last 和 total_turnover，历史回放使用对应交易日的日线。</span></dd></div>
+          <div class="source-item"><dt>上一交易日收盘</dt><dd><code>rqdatac.get_price(frequency="1d")</code><span>取不复权 close 计算涨跌幅。</span></dd></div>
+          <div class="source-item"><dt>代码与名称</dt><dd><code>config/universe.json</code><span>读已核对的成员配置。</span></dd></div>
+        </dl></div>
       </details>
 
     </section>
     <footer>
-      数据服务：FtShare。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
+      数据服务：RQData。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
     </footer>
     </div>
   </section>
@@ -159,29 +142,25 @@
     <div class="comparison-grid">
     <section class="chart-wrap"><div class="chart" id="chartAmt"></div>
       <details class="chart-source" data-source-for="chartAmt">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>历史交易日的ETF成交额</dt><dd><code>ft_v2_etf_candlesticks_batch</code><span>ETF历史日成交额 / 前收盘 · turnover、close；interval_unit=Day</span></dd></div>
-          <div class="source-item"><dt>当日ETF成交额</dt><dd><code>ft_v4_stock_realtime_day_kline</code> / <code>ft_v4_etf_realtime_day_kline</code><span>ETF当日行情 · close、turnover、symbol</span></dd></div>
-          <div class="source-item"><dt>筛选净申购估算超过100亿元的日期</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>与份额共同确定日期筛选依据</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date</span></dd></div>
-
-        </dl><p>柱高为成交额；份额和净值只用于筛选放量日期，沿用本看板的案例日期排除规则。 份额与净值按交易日期对齐，净申赎金额按统一口径估算。</p></div>
+          <div class="source-item"><dt>历史与当日成交额</dt><dd><code>rqdatac.get_price(frequency="1d") / rqdatac.current_snapshot</code><span>使用 total_turnover。</span></dd></div>
+          <div class="source-item"><dt>放量日筛选</dt><dd><code>fund.get_daily_units / fund.get_nav</code><span>按日度净申购估算筛选。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     <section class="chart-wrap"><div class="chart" id="chartNf"></div>
       <details class="chart-source" data-source-for="chartNf">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>每日份额变化</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>资金归属日单位净值</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date</span></dd></div>
-
-        </dl><p>净申购金额按对齐交易日期后的份额变化与原始单位净值估算。历史份额补充保留原始统计日期，并与FtShare记录日期对齐。</p></div>
+          <div class="source-item"><dt>日度份额与原始单位净值</dt><dd><code>fund.get_daily_units / fund.get_nav</code><span>使用 units 与 unit_net_value，按归属日计算。</span></dd></div>
+          <div class="source-item"><dt>份额折算</dt><dd><code>fund.get_split</code><span>与相邻净值因子交叉校验。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     </div>
     <footer>
-      数据服务：FtShare。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
+      数据服务：RQData。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
     </footer>
     </div>
   </section>
@@ -192,27 +171,19 @@
     <div class="sub data-note" id="dailyRange"></div>
     <section class="chart-wrap"><div class="chart" id="chartDAmt"></div>
       <details class="chart-source" data-source-for="chartDAmt">
-        <summary><span class="source-label">FtShare接口</span> · ETF日成交额与指数日线 / 分钟行情<span class="source-action">查看详情</span></summary>
-        <div class="source-content">
-          <dl>
-            <div class="source-item"><dt>历史ETF日成交额</dt><dd><code>ft_v2_etf_candlesticks_batch</code><span>ETF历史日成交额 / 前收盘 · turnover、close；interval_unit=Day</span></dd></div>
-            <div class="source-item"><dt>当日ETF成交额</dt><dd><code>ft_v4_stock_realtime_day_kline</code> / <code>ft_v4_etf_realtime_day_kline</code><span>ETF当日行情 · close、turnover、symbol</span></dd></div>
-            <div class="source-item"><dt>历史上证综指收盘点位</dt><dd><code>ft_v1_index_candlesticks</code><span>上证综指历史日线 · close；symbol=000001.SH；interval_unit=Day</span></dd></div>
-            <div class="source-item"><dt>当日上证综指最新点位</dt><dd><code>ft_v4_index_realtime_minute_kline</code><span>上证综指实时分钟行情 · close、ts_millis；symbol=000001.SH</span></dd></div>
-          </dl>
-          <p>ETF成交额按20只篮子求和并换算为亿元，当日值由实时接口追加。</p>
-        </div>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
+        <div class="source-content"><dl>
+          <div class="source-item"><dt>ETF日成交额与上证综指</dt><dd><code>rqdatac.get_price(frequency="1d")</code><span>使用不复权日线的 total_turnover 和 close。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     <section class="chart-wrap"><div class="chart" id="chartDNf"></div>
       <details class="chart-source" data-source-for="chartDNf">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>20只ETF的每日份额</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>20只ETF的原始单位净值</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date</span></dd></div>
-          <div class="source-item"><dt>对应资金日期的上证综指收盘点位</dt><dd><code>ft_v1_index_candlesticks</code><span>上证综指历史日线 · close；symbol=000001.SH；interval_unit=Day</span></dd></div>
-
-        </dl><p>按沪深分别对齐的份额变化乘资金归属日净值，汇总为篮子净申购估算。 份额与净值按交易日期对齐，净申赎金额按统一口径估算。</p></div>
+          <div class="source-item"><dt>ETF份额与单位净值</dt><dd><code>fund.get_daily_units / fund.get_nav</code><span>使用 units 与 unit_net_value。</span></dd></div>
+          <div class="source-item"><dt>上证综指日收盘</dt><dd><code>rqdatac.get_price(frequency="1d")</code><span>使用 000001.XSHG 的 close，按归属日对齐。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     <div class="sub data-note" id="universeText"></div>
@@ -229,24 +200,11 @@
     <section class="chart-wrap"><div class="chart" id="chartBroad"></div>
       <p class="data-note" id="broadIndexNote"></p>
       <details class="chart-source" data-source-for="chartBroad">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>折线：上证指数日收盘点位（独立右轴，点）</dt><dd><code>ft_v1_index_candlesticks</code><span>symbol=000001.SH；interval_unit=Day；close、ts_millis；按交易日期对齐</span></dd></div>
-          <div class="source-item"><dt>宽基成员的每日份额</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>宽基成员的原始单位净值</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date、adjustment_factor</span></dd></div>
-          <div class="source-item"><dt>按当前版本跟踪指数名单划分12类</dt><dd><code>ft_v2_etf_description_all</code><span>ETF名称与跟踪指数 · symbol、name、tracking_index_id、tracking_index_symbol、inception_date；分类名单使用已采集的版本快照</span></dd></div>
-          <div class="source-item"><dt>确定成员从哪一天纳入统计</dt><dd><code>ft_v1_fund_fund_list</code><span>基金上市日期 · listed_date；按基金代码查询，随成员版本保存</span></dd></div>
-          <div class="source-item"><dt>11只上市首日的上市前份额基准</dt><dd><code>ft_v1_fund_fund_share</code><span>基金全部周期份额 · fund_share、statistics_period=截止时点、trade_date；不将快照当成日度序列</span></dd></div>
-          <div class="source-item"><dt>确认申购、赎回业务起始日</dt><dd><code>ft_v2_announcements_etf_announcements</code><span>ETF历史公告 · 上市前募集份额仅在公告确认上市前未开放日常申赎时作首日基准</span></dd></div>
-          <div class="source-item"><dt>核对申赎开放日公告正文</dt><dd><code>ft_v2_announcements_etf_announcement_download</code><span>ETF公告原文下载 · 11份公告原文，验证结果随数据版本保存</span></dd></div>
-          <div class="source-item"><dt>交叉核实4个份额折算事件</dt><dd><code>ft_v1_etf_adjust_factor</code><span>ETF复权因子 · adj_factor、ex_adj_factor；计算采用归属日NAV的adjustment_factor，分红不按折算处理</span></dd></div>
-          <div class="source-item"><dt>补159821、515190的2026-10-29单位净值</dt><dd><code>ft_v2_etf_pre_single</code><span>ETF盘前数据 · 次一交易日2026-10-30的nav；经PCF PreTradingDay核实归属日期</span></dd></div>
-          <div class="source-item"><dt>查找次一交易日的原始PCF文件</dt><dd><code>ft_v2_etf_pcf_etf_pcfs</code><span>ETF申赎清单文件列表 · date=20261030</span></dd></div>
-          <div class="source-item"><dt>交叉核实补充净值与归属日期</dt><dd><code>ft_v1_etf_pcf_etf_pcf_download</code><span>ETF原始PCF下载 · PreTradingDay=20261029；NAV=0.9516 / 1.3627</span></dd></div>
-
-          <div class="source-item"><dt>20个历史份额合并、折算及拆分事件</dt><dd><code>ft_v1_etf_adjust_factor</code><span>按公告精确比例校正份额，使用FtShare净值因子交叉核对；不把分红计入份额折算</span></dd></div>
-          <div class="source-item"><dt>补159571的2025-09-11单位净值</dt><dd><code>ft_v2_etf_pre_single</code> / <code>ft_v1_etf_pcf_etf_pcf_download</code><span>次日2025-09-12申赎清单：PreTradingDay=20250911、NAV=1.4599</span></dd></div>
-        </dl><p>日度净流入由每日份额变化与原始净值计算，累计自所选区间首个交易日起计算。数据服务：FtShare。当前成员按配置分类回溯，上市基准与份额折算按核实记录校正。</p></div>
+          <div class="source-item"><dt>分类净申赎</dt><dd><code>fund.get_daily_units / fund.get_nav / fund.get_split</code><span>按份额变化与原始净值估算。上市首日缺少可核实前值时保留缺口，累计在缺口处停止。</span></dd></div>
+          <div class="source-item"><dt>上证综指与分类成员</dt><dd><code>rqdatac.get_price(frequency="1d") / config/universe.json</code><span>指数使用不复权 close。分类及上市日期使用项目成员配置。</span></dd></div>
+        </dl></div>
       </details>
 </section>
     <details class="gap-report" id="broadGapReport">
@@ -258,33 +216,21 @@
       <h2 id="broadTableTitle">最近一个月 · 各类宽基ETF日度净申购估算（亿元，红=净申购 / 绿=净赎回，颜色深浅按当列相对大小）</h2>
       <div class="tscroll"><table id="broadTable"></table></div>
       <details class="chart-source" data-source-for="broadTable">
-        <summary><span class="source-label">数据服务</span> · FtShare金融数据服务<span class="source-action">查看详情</span></summary>
+        <summary><span class="source-label">RQData 数据接口</span><span class="source-action">查看详情</span></summary>
         <div class="source-content"><dl>
-          <div class="source-item"><dt>宽基成员的每日份额</dt><dd><code>ft_v2_etf_share</code><span>ETF每日份额 · fund_share、trade_date；stati_perd=日</span></dd></div>
-          <div class="source-item"><dt>宽基成员的原始单位净值</dt><dd><code>ft_v2_etf_net_value</code><span>ETF原始单位净值 · unit_nav、nav_date、adjustment_factor</span></dd></div>
-          <div class="source-item"><dt>与宽基分类图使用同一版本成员名单</dt><dd><code>ft_v2_etf_description_all</code><span>ETF名称与跟踪指数 · symbol、name、tracking_index_id、tracking_index_symbol、inception_date；分类名单使用已采集的版本快照</span></dd></div>
-          <div class="source-item"><dt>确定成员从哪一天纳入统计</dt><dd><code>ft_v1_fund_fund_list</code><span>基金上市日期 · listed_date；按基金代码查询，随成员版本保存</span></dd></div>
-          <div class="source-item"><dt>11只上市首日的上市前份额基准</dt><dd><code>ft_v1_fund_fund_share</code><span>基金全部周期份额 · fund_share、statistics_period=截止时点、trade_date；不将快照当成日度序列</span></dd></div>
-          <div class="source-item"><dt>确认申购、赎回业务起始日</dt><dd><code>ft_v2_announcements_etf_announcements</code><span>ETF历史公告 · 上市前募集份额仅在公告确认上市前未开放日常申赎时作首日基准</span></dd></div>
-          <div class="source-item"><dt>核对申赎开放日公告正文</dt><dd><code>ft_v2_announcements_etf_announcement_download</code><span>ETF公告原文下载 · 11份公告原文，验证结果随数据版本保存</span></dd></div>
-          <div class="source-item"><dt>交叉核实4个份额折算事件</dt><dd><code>ft_v1_etf_adjust_factor</code><span>ETF复权因子 · adj_factor、ex_adj_factor；计算采用归属日NAV的adjustment_factor，分红不按折算处理</span></dd></div>
-          <div class="source-item"><dt>补159821、515190的2026-10-29单位净值</dt><dd><code>ft_v2_etf_pre_single</code><span>ETF盘前数据 · 次一交易日2026-10-30的nav；经PCF PreTradingDay核实归属日期</span></dd></div>
-          <div class="source-item"><dt>查找次一交易日的原始PCF文件</dt><dd><code>ft_v2_etf_pcf_etf_pcfs</code><span>ETF申赎清单文件列表 · date=20261030</span></dd></div>
-          <div class="source-item"><dt>交叉核实补充净值与归属日期</dt><dd><code>ft_v1_etf_pcf_etf_pcf_download</code><span>ETF原始PCF下载 · PreTradingDay=20261029；NAV=0.9516 / 1.3627</span></dd></div>
-
-        </dl><p>分类表与宽基图使用相同的份额、折算和净值补充规则；展示所选区间最近22个交易日。 份额与净值按交易日期对齐，净申赎金额按统一口径估算。</p></div>
+          <div class="source-item"><dt>日度份额、单位净值及折算</dt><dd><code>fund.get_daily_units / fund.get_nav / fund.get_split</code><span>与宽基图使用同一计算口径和成员版本。</span></dd></div>
+        </dl></div>
       </details>
 
     </section>
     <footer>
-      数据服务：FtShare。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
+      数据服务：RQData。净申赎估算按交易日期对齐，缺失日期及原因可展开查看。
     </footer>
     </div>
   </section>
   <aside class="source-support">
     <strong>通用辅助接口</strong>
-    <p>交易日历：<code>ft_v1_time_trading_calendar</code>，用于前后交易日、历史日期及近20日窗口。</p>
-    <p>行情日期备用来源：<code>ft_v4_index_realtime_day_kline</code>，仅在指数分钟数据未返回时辅助确定日期。</p>
+    <p>交易日历：<code>rqdatac.get_trading_dates</code>，用于前后交易日、历史日期及近20日窗口。</p>
     <p id="sourcePolicy">历史数据来自部署者配置的授权快照，近期数据通过服务端接口追加。</p>
     <p><a href="/licenses/MIT.txt">项目许可</a> · <a href="/licenses/echarts-NOTICE.txt">ECharts 声明</a> · <a href="/licenses/echarts-LICENSE.txt">Apache-2.0</a> · <a href="/licenses/d3-LICENSE.txt">D3 许可</a></p>
   </aside>

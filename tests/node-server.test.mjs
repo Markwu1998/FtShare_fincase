@@ -3,11 +3,16 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
-test('standalone Node server serves all chart assets and demo APIs without local credentials', { timeout: 20000 }, async () => {
+test('standalone Node server serves all chart assets and demo APIs without local credentials', { timeout: 20000 }, async t => {
   const root = fileURLToPath(new URL('../', import.meta.url));
-  execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: root, env: { ...process.env, DATA_MODE: 'demo' }, stdio: 'pipe' });
-  const child = spawn(process.execPath, ['scripts/serve.mjs'], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: '0', FTSHARE_API_KEY: '', FTSHARE_API_KEY_FILE: '', FTSHARE_BUILD_DIR: 'dist', API_REQUESTS_PER_MINUTE: '3', TRUST_LOOPBACK_PROXY: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  await mkdir(resolve(root, '.local/releases'), { recursive: true });
+  const output = await mkdtemp(resolve(root, '.local/releases/node-server-test-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: root, env: { ...process.env, DATA_MODE: 'demo', BUILD_OUTPUT_DIR: output }, stdio: 'pipe' });
+  const child = spawn(process.execPath, ['scripts/serve.mjs'], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: '0', FTSHARE_API_KEY: '', FTSHARE_API_KEY_FILE: '', FTSHARE_BUILD_DIR: output, API_REQUESTS_PER_MINUTE: '3', TRUST_LOOPBACK_PROXY: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     const url = await new Promise((resolve, reject) => {
       let text = ''; const timeout = setTimeout(() => reject(new Error('Server did not start')), 10000);

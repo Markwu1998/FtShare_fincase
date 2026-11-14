@@ -31,7 +31,7 @@ if (mode === 'bootstrap') {
     try { await exec(process.execPath, ['scripts/collect.mjs', '--recent'], { cwd: root, env: { ...env, FTSHARE_SEED_FILE: seedFile }, maxBuffer: 1024 * 1024 }); collected = true; break; }
     catch (error) {
       let detail = String(error.stderr || error.message);
-      for (const secret of [env.FTSHARE_API_KEY, env.CLOUDFLARE_API_TOKEN, token].filter(Boolean)) detail = detail.replaceAll(secret, '[redacted]');
+      for (const secret of [env.RQDATAC2_CONF, env.RQDATAC_CONF, env.FTSHARE_API_KEY, env.CLOUDFLARE_API_TOKEN, token].filter(Boolean)) detail = detail.replaceAll(secret, '[redacted]');
       detail = detail.replace(/ftshare_sk_[A-Za-z0-9_-]+/g, '[redacted]');
       console.error('Collection attempt ' + (attempt + 1) + ' failed:\n' + detail.slice(-2400));
       if (/^\s*code:\s*['"](?:quota_exceeded|rate_limited)['"]/m.test(detail) || attempt === 2) break;

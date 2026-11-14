@@ -4,10 +4,13 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clientAddress, createRequestGuard, positiveOption } from './lib/request-guard.mjs';
 import { createUpstreamGuard } from './lib/upstream-guard.mjs';
+import { activeRelease } from './lib/deployment.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 // LaunchAgents explicitly select the active managed release; ordinary npm start
 // always serves dist so a previous Mac installation cannot override demo builds.
-const output = process.env.FTSHARE_BUILD_DIR || 'dist';
+const configuredOutput = resolve(root, process.env.FTSHARE_BUILD_DIR || 'dist');
+const output = process.platform === 'win32' && configuredOutput === resolve(root, '.local/current')
+  ? await activeRelease(root) || configuredOutput : configuredOutput;
 globalThis.fetch = createUpstreamGuard(globalThis.fetch, {
   perMinute: positiveOption(process.env, 'UPSTREAM_REQUESTS_PER_MINUTE', 1200),
   concurrent: positiveOption(process.env, 'UPSTREAM_CONCURRENCY', 32)
@@ -38,7 +41,7 @@ const server = createServer(async (incoming, outgoing) => {
       }
     }
     const request = new Request('http://localhost' + (incoming.url || '/'), { method, headers: incoming.headers });
-    const result = await worker.fetch(request, { FTSHARE_CACHE: cache });
+    const result = await worker.fetch(request, { FTSHARE_CACHE: cache, RQDATA_ALLOW_REPLAY: process.env.RQDATA_ALLOW_REPLAY });
     outgoing.writeHead(result.status, Object.fromEntries(result.headers));
     outgoing.end(method === 'HEAD' ? undefined : Buffer.from(await result.arrayBuffer()));
   } catch {

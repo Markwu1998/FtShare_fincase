@@ -40,7 +40,9 @@ report.key_environment_present = Boolean(process.env.FTSHARE_API_KEY);
 if (keyPath) {
   try {
     const info = await stat(resolve(root, keyPath));
-    report.key_file = { exists: true, restrictive_permissions: (info.mode & 0o077) === 0, permissions: (info.mode & 0o777).toString(8) };
+    report.key_file = process.platform === 'win32'
+      ? { exists: true, restrictive_permissions: null, permissions: null }
+      : { exists: true, restrictive_permissions: (info.mode & 0o077) === 0, permissions: (info.mode & 0o777).toString(8) };
   } catch { report.key_file = { exists: false }; }
 }
 try {

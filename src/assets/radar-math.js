@@ -11,7 +11,8 @@ function windowRange(slots, end) {
 export function evaluateRadar(seed, live, options = {}) {
   const rules = { ...RADAR_DEFAULTS, ...options };
   const slots = seed.minute_slots || [], actual = live?.bars || [], coverage = live?.coverage || [];
-  const last = actual.map((v, i) => valid(v) && coverage[i] === 20 ? i : -1).reduce((a, b) => Math.max(a, b), -1);
+  const usable = live?.provider !== 'RQData' || live.replay || !live.cache?.stale;
+  const last = usable ? actual.map((v, i) => valid(v) && coverage[i] === 20 ? i : -1).reduce((a, b) => Math.max(a, b), -1) : -1;
   const end = Number.isInteger(options.at) ? Math.max(-1, Math.min(last, options.at)) : last;
   const history = Object.entries(seed.minutes || {}).filter(([date, r]) => date < live?.date && !r.quality && r.bars?.length === slots.length && r.bars.every(valid))
     .sort(([a], [b]) => b.localeCompare(a)).slice(0, 60);

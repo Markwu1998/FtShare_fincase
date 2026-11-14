@@ -13,6 +13,7 @@ export function chinaDate(ts = Date.now()) { return new Date(ts + 8*3600000).toI
 export function chinaTime(ts) { return new Date(ts + 8*3600000).toISOString().slice(11,16); }
 export function fullAxis() { const a=[]; for(let m=9*60+30;m<=11*60+30;m++)a.push(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'));for(let m=13*60+1;m<=15*60;m++)a.push(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'));return a; }
 export const SLOTS = fullAxis();
+export const RQDATA_SLOTS = SLOTS.slice(1);
 const finite = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
 function fixed(v,precision=8) { if(!finite(v))return null;const [a,b='']=String(v).split('.'),scale=10n**BigInt(precision);return BigInt(a)*scale+BigInt((b+'0'.repeat(precision)).slice(0,precision))*(String(v).startsWith('-')?-1n:1n); }
 export function estimateFlow(current, previous, nav, previousNav, splitRatio = 1) {
@@ -24,7 +25,7 @@ export function estimateFlow(current, previous, nav, previousNav, splitRatio = 1
   const prior=fixed(previous.fund_share)*fixed(splitRatio,12)/1000000000000n;
   return Number((fixed(current.fund_share)-prior)*fixed(nav.unit_nav))/1e24;
 }
-export function fundDaily(fund, shares, navs, calendar) {
+export function fundDaily(fund, shares, navs, calendar, { alignedShares = false, reportedSplits } = {}) {
   const sm=new Map(shares.filter(r=>r.statistics_period==='日').map(r=>[dateISO(r.trade_date),r]));
   const evidence=fund.flow_evidence||{};
   // Explicit FtShare PCF recoveries are used only when the normal NAV endpoint is missing.
@@ -34,10 +35,10 @@ export function fundDaily(fund, shares, navs, calendar) {
   for(let i=1;i<calendar.length;i++){
     const d=calendar[i],p=calendar[i-1];
     if(d<fundStartDate(fund)){result[d]={flow:0,...(d<fund.inception_date?{not_yet_incepted:true}:{not_yet_listed:true})};continue;}
-    // FtShare share-record dates require exchange alignment. SZ needs the next
-    // actual trading-day record; until it exists the attributed day's flow is null.
-    const sd=fund.symbol?.endsWith('.SZ')?calendar[i+1]:d;
-    const pd=fund.symbol?.endsWith('.SZ')?d:p;
+    // FtShare SZ records use the next trading date. RQData already reports the attributed date.
+    const nextShareDate=!alignedShares&&fund.symbol?.endsWith('.SZ');
+    const sd=nextShareDate?calendar[i+1]:d;
+    const pd=nextShareDate?d:p;
     const s=sm.get(sd),n=nm.get(d),pn=nm.get(p),baseline=evidence.listing_baseline;
     let prev=sm.get(pd),usedBaseline=false,splitRatio=1;
     if(!prev&&fund.symbol?.endsWith('.SH')&&fund.listed_date===d&&baseline?.date===pd&&baseline.subscription_start_date>=d&&baseline.redemption_start_date>=d&&finite(baseline.fund_share)){
@@ -45,6 +46,10 @@ export function fundDaily(fund, shares, navs, calendar) {
     }
     const split=(evidence.splits||[]).find(e=>e.date===d);
     if(split&&finite(n?.adjustment_factor)&&finite(pn?.adjustment_factor)&&Number(pn.adjustment_factor)>0&&Math.abs((Number(n.adjustment_factor)/Number(pn.adjustment_factor))/Number(split.ratio)-1)<(split.source?.verified_official_event===true?5e-6:1e-8))splitRatio=Number(split.ratio);
+    const reported=reportedSplits?.get(d);
+    const factorRatio=Number(n?.adjustment_factor)/Number(pn?.adjustment_factor);
+    const rqSplit=reported>0&&Math.abs(factorRatio/reported-1)<5e-4;
+    if(rqSplit&&splitRatio===1)splitRatio=reported;
     const flow=estimateFlow(s,prev,n,pn,splitRatio),issues=[];
     if(flow===null){
       if(!s||!finite(s.fund_share))issues.push('share_missing');
@@ -52,7 +57,7 @@ export function fundDaily(fund, shares, navs, calendar) {
       if(!n||!finite(n.unit_nav)||Number(n.unit_nav)<=0)issues.push('nav_missing');
       if(!issues.length)issues.push('share_change_review');
     }
-    result[d]={flow,shares:s?.fund_share??null,nav:n?.unit_nav??null,shares_record_date:sd??null,previous_shares_record_date:pd,publish_date:n?.publish_date?dateISO(n.publish_date):null,...(usedBaseline?{baseline_source:'verified_prelisting_shares'}:{}),...(splitRatio!==1?{split_ratio:splitRatio}:{}),...(n?.source?{nav_source:n.source}:{}),...(issues.length?{issues}:{})};
+    result[d]={flow,shares:s?.fund_share??null,nav:n?.unit_nav??null,shares_record_date:sd??null,previous_shares_record_date:pd,publish_date:n?.publish_date?dateISO(n.publish_date):null,...(usedBaseline?{baseline_source:'verified_prelisting_shares'}:{}),...(splitRatio!==1?{split_ratio:splitRatio}:{}),...(rqSplit?{split_source:'RQData fund.get_split and NAV factor'}:{}),...(n?.source?{nav_source:n.source}:{}),...(issues.length?{issues}:{})};
   }
   return result;
 }
@@ -69,10 +74,19 @@ export function aggregateFunds(funds, raw, calendar) {
   const total=dates.map((_,i)=>CATEGORIES.every(c=>group[c].values[i]!==null)?CATEGORIES.reduce((s,c)=>s+group[c].values[i],0):null);
   return {dates,basket,broad:{dates,cats:CATEGORIES,colors:COLORS,series:Object.fromEntries(CATEGORIES.map(c=>[c,group[c].values])),coverage:Object.fromEntries(CATEGORIES.map(c=>[c,{valid:group[c].valid,expected:group[c].expected}])),total,issues}};
 }
-export function aggregateMinute(rows, symbols, date) {
+export function aggregateMinute(rows, symbols, date, slots = SLOTS) {
   const by=new Map(symbols.map(s=>[s,new Map()]));
   for(const r of rows){if(chinaDate(r.ts_millis)!==date||!by.has(r.symbol))continue;by.get(r.symbol).set(chinaTime(r.ts_millis),r);}
-  return {date,slots:SLOTS,bars:SLOTS.map(t=>{let sum=0;for(const s of symbols){const r=by.get(s).get(t);if(!r||!finite(r.turnover))return null;sum+=Number(r.turnover);}return sum/1e8;}),coverage:SLOTS.map(t=>symbols.filter(s=>by.get(s).has(t)).length)};
+  const bars=[],coverage=[];
+  for(const slot of slots){
+    let sum=0,count=0;
+    for(const symbol of symbols){
+      const turnover=by.get(symbol).get(slot)?.turnover;
+      if(finite(turnover)&&Number(turnover)>=0){sum+=Number(turnover);count++;}
+    }
+    bars.push(count===symbols.length?sum/1e8:null);coverage.push(count);
+  }
+  return {date,slots,bars,coverage};
 }
 export function cumulative(bars) { return strictCumulative(bars); }
 export async function mapLimit(items, max, fn) {const out=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(max,items.length)},async()=>{while(next<items.length){let i=next++;out[i]=await fn(items[i],i);}}));return out;}

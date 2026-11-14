@@ -6,7 +6,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { macJobs, plist } from './lib/macos.mjs';
 import { refreshDeployment, probeServer } from './lib/deployment.mjs';
-import { loadAPIKey } from './lib/key.mjs';
 
 const exec = promisify(execFile), root = fileURLToPath(new URL('../', import.meta.url));
 const action = process.argv[2] || 'help';
@@ -15,7 +14,7 @@ const labels = ['com.ftshare.etf-dashboard', 'com.ftshare.etf-dashboard.refresh'
 const agent = label => resolve(homedir(), 'Library/LaunchAgents', label + '.plist');
 try {
   if (!['install', 'status', 'uninstall'].includes(action)) {
-    console.log('npm run mac:install [-- --demo|--dry-run|--lan]\nnpm run mac:status\nnpm run mac:uninstall\nDefault binding: loopback for Caddy on this Mac. --lan explicitly enables LAN HTTP. Live mode requires .env, a snapshot and an API key.');
+    console.log('npm run mac:install [-- --demo|--dry-run|--lan]\nnpm run mac:status\nnpm run mac:uninstall\nDefault binding: loopback for Caddy on this Mac. --lan explicitly enables LAN HTTP. Live mode requires .env, an RQData snapshot and credentials for the scheduled collector.');
   } else {
     if (process.platform !== 'darwin' && !process.argv.includes('--dry-run')) throw new Error('macOS is required');
     if (process.getuid?.() === 0) throw new Error('Run as the Mac login user, without sudo');
@@ -42,7 +41,6 @@ try {
         console.log('Dry run: generated plists in .local/macos; no services installed or started.');
       } else {
         await access(resolve(root, '.env'));
-        if (!demo && !await loadAPIKey()) throw new Error('Configure FTSHARE_API_KEY_FILE before installing live service');
         // Refuse to replace an unrelated service using the same label.
         for (const label of labels) {
           try {

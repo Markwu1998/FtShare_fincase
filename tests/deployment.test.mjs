@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, mkdir, readFile, writeFile, readlink, rm } from 'node:fs/promises';
+import { mkdtemp, cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
-import { refreshDeployment } from '../scripts/lib/deployment.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { activeRelease, refreshDeployment } from '../scripts/lib/deployment.mjs';
 import { recentCollection } from '../scripts/lib/recent-collection.mjs';
 import { macJobs, plist } from '../scripts/lib/macos.mjs';
 
@@ -54,15 +55,15 @@ test('recent collection overlaps the older source date for corrections and delay
 test('upstream collection failure leaves both the running build and historical snapshot unchanged', { timeout: 20000 }, async t => {
   const { root, env } = await fixture(t);
   await refreshDeployment({ root, env, collect: false });
-  const prior = await readlink(resolve(root, '.local/current'));
+  const prior = await activeRelease(root);
   const data = await readFile(resolve(root, 'data/private/seed.json'), 'utf8');
   await assert.rejects(refreshDeployment({ root, env, run: async script => {
     assert.equal(script, 'scripts/collect.mjs'); throw new Error('Simulated upstream outage');
   } }), /Simulated upstream outage/);
-  assert.equal(await readlink(resolve(root, '.local/current')), prior);
+  assert.equal(await activeRelease(root), prior);
   assert.equal(await readFile(resolve(root, 'data/private/seed.json'), 'utf8'), data);
-  const artifact = resolve(root, '.local/current/server/index.js');
-  const worker = (await import('file://' + artifact)).default;
+  const artifact = resolve(prior, 'server/index.js');
+  const worker = (await import(pathToFileURL(artifact).href)).default;
   assert.equal((await worker.fetch(new Request('http://localhost/'))).status, 200);
   assert.equal((await worker.fetch(new Request('http://localhost/assets/ftai-mark.svg'))).status, 200);
 });
@@ -70,7 +71,7 @@ test('upstream collection failure leaves both the running build and historical s
 test('failed health check rolls back the active release and snapshot, and restarts the old service', { timeout: 20000 }, async t => {
   const { root, env, seed } = await fixture(t);
   await refreshDeployment({ root, env, collect: false });
-  const prior = await readlink(resolve(root, '.local/current'));
+  const prior = await activeRelease(root);
   const data = await readFile(resolve(root, 'data/private/seed.json'), 'utf8');
   await mkdir(resolve(root, '.local/macos'), { recursive: true });
   await writeFile(resolve(root, '.local/macos/installation.json'), JSON.stringify({ domain: 'gui/1234', label: 'test', port: 8080 }));
@@ -84,14 +85,14 @@ test('failed health check rolls back the active release and snapshot, and restar
     restart: async () => { restarts++; }, probe: async () => { if (++probes === 1) throw new Error('Simulated bad start'); }
   }), /Simulated bad start/);
   assert.equal(restarts, 2); assert.equal(probes, 2);
-  assert.equal(await readlink(resolve(root, '.local/current')), prior);
+  assert.equal(await activeRelease(root), prior);
   assert.equal(await readFile(resolve(root, 'data/private/seed.json'), 'utf8'), data);
 });
 
 test('a successful refresh publishes validated data and updates persistent source only after building', { timeout: 20000 }, async t => {
   const { root, env, seed } = await fixture(t);
   await refreshDeployment({ root, env, collect: false });
-  const prior = await readlink(resolve(root, '.local/current'));
+  const prior = await activeRelease(root);
   const builtAt = '2026-11-11T11:00:00.000Z';
   const run = async (script, args, childEnv) => {
     if (script === 'scripts/collect.mjs') await writeFile(childEnv.FTSHARE_SEED_FILE, JSON.stringify({ ...seed, built_at: builtAt }));
@@ -99,7 +100,25 @@ test('a successful refresh publishes validated data and updates persistent sourc
   };
   const result = await refreshDeployment({ root, env, run });
   assert.equal(result.built_at, builtAt);
-  assert.notEqual(await readlink(resolve(root, '.local/current')), prior);
+  assert.notEqual(await activeRelease(root), prior);
   assert.equal(JSON.parse(await readFile(resolve(root, 'data/private/seed.json'), 'utf8')).built_at, builtAt);
   assert.equal(JSON.parse(await readFile(resolve(root, '.local/last-refresh.json'), 'utf8')).built_at, builtAt);
+  const child = spawn(process.execPath, ['scripts/serve.mjs'], {
+    cwd: root, env: { ...env, HOST: '127.0.0.1', PORT: '0', FTSHARE_BUILD_DIR: '.local/current' },
+    stdio: ['ignore', 'pipe', 'ignore']
+  });
+  const exited = once(child, 'exit');
+  try {
+    const address = await Promise.race([
+      once(child.stdout, 'data').then(([chunk]) => /Dashboard: (http:\/\/127\.0\.0\.1:\d+)/.exec(String(chunk))?.[1]),
+      exited.then(() => null)
+    ]);
+    assert(address, 'Managed server must start from the published build');
+    const response = await fetch(address + '/api/health', { signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).history_built_at, builtAt);
+  } finally {
+    child.kill();
+    await exited;
+  }
 });
