@@ -9,8 +9,151 @@ export function createRadar(root) {
     <div class="radar-metrics"><div><span>累计成交额</span><strong id="radarAmount">—</strong><small id="radarAmountNote">—</small></div><div><span>20日 · 同进度倍数</span><strong id="radarMultiple">—</strong><small id="radarMultipleNote">—</small></div><div><span>60日 · 同进度倍数</span><strong id="radarLongMultiple">—</strong><small id="radarLongNote">—</small></div><div><span>近5分钟 · 20日 / 60日</span><strong id="radarBurst">—</strong><small id="radarBurstNote">—</small></div><div><span>上证指数涨跌</span><strong id="radarIndex">—</strong><small>与观察时点对应</small></div></div>
     <div class="radar-controls"><span class="radar-baselines">20日近期基准 × 60日辅助基准</span><label class="radar-replay">时点回放<input id="radarTime" type="range" min="0" max="240" value="240" aria-label="回放观察时点"><output id="radarTimeLabel">—</output></label><button id="radarFollow" type="button">跟随最新快照</button></div>
     <details class="radar-rules"><summary>信号规则与样本</summary><div class="radar-rule-inputs"><label>双基准累计阈值<input id="radarCumThreshold" type="number" min="1.1" max="5" step="0.1" value="1.5">倍</label><label>短时放量阈值<input id="radarBurstThreshold" type="number" min="1.2" max="10" step="0.1" value="2">倍</label><label>单只日度净申赎<input id="radarFlowThreshold" type="number" min="1" max="100" step="1" value="10">亿元</label></div><p>20日与60日均与历史同一时点比较，两者累计倍数都达到阈值才提示「持续关注」；仅20日触发为「近期放量」，仅60日触发为「长周期偏高」。短时信号要求5分钟成交额至少5亿元，两个基准连续两个逐分钟窗口都达到阈值才确认。开盘前15个交易分钟仅观察；每个基准须满20／60个完整历史交易日，样本不足不作双基准确认。</p><p id="radarSamples"></p><p>日度净申赎由每日份额与原始净值估算，按归属日期独立展示。以上为测试版初始观察阈值，尚未经过历史回测校准，可自行调整。</p></details></div>
+    <div class="radar-board" id="etfBurst" hidden>
+      <div class="radar-funds-heading"><div><h3>单只 ETF · 盘中集中交易</h3><p id="burstStatus" role="status">等待分钟行情</p></div></div>
+      <div class="radar-controls">
+        <label>行情模式 <select id="burstDate"><option value="">实时</option></select></label>
+        <label id="burstTimeLabel" hidden>回放时点 <input id="burstTime" type="time" step="60" value="14:57"></label>
+        <button id="burstSound" type="button" aria-pressed="false">开启提示音</button>
+      </div>
+      <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交窗口</th><th>同窗量比 20／60日</th><th>全天量比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
+      <div id="burstDetail" class="chart" style="height:250px" hidden aria-label="所选事件的成交量与同窗基准"></div>
+    </div>
     <div class="radar-funds-heading"><div><h3>单只 ETF · 日度资金信号</h3><p id="radarFundDates">等待共享快照</p></div><div class="radar-fund-counts" id="radarFundCounts"></div></div><div class="radar-funds" id="radarFunds"></div><button class="radar-expand" id="radarExpand" type="button">展开全部20只 ETF</button>`;
   const $ = id => root.querySelector('#' + id), number = (id, fallback, min, max) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : fallback; };
+  let burst, eventStream, choice = 0, audio, sound = false, burstEnabled = false;
+  let burstChart, selected, details = new Map();
+  const levels = ['', '预警', '确认', '极端放量'];
+  const names = () => new Map((seed?.universe || []).map(fund => [fund.symbol, fund.name]));
+  function renderBurst() {
+    if (!burst) return;
+    const cutoff = burst.replay ? ($('burstTime').value || '14:57') : '15:00';
+    const knownNames = names();
+    const rows = burst.events.filter(event => event.first <= cutoff).slice().sort((a,b) => b.first.localeCompare(a.first));
+    details = new Map();
+    const pair = (values, mode) => values.map(v => v == null ? '—' : mode === 'pct' ? fmt(v * 100, 1) + '%' : fmt(v, 1) + '×').join(' / ');
+    $('burstEvents').innerHTML = rows.map(event => {
+      const signal = burst.replay && event.peak.end > cutoff ? event.updates.filter(v => v.end <= cutoff)
+        .reduce((best, v) => v.level > best.level || v.level === best.level &&
+          Math.min(...v.daily) > Math.min(...best.daily) ? v : best) : event.peak;
+      const {premium, premium_cross, pressure, peers, index} = event.evidence;
+      const evidence = burst.replay ? [] : [
+        premium && '溢价 ' + signed(premium.bp) + ' bp',
+        premium_cross && '持续转溢',
+        pressure && '卖一上移伴成交 ' + pressure.ask_up_with_volume + '次',
+        peers?.length && '同指数同步 ' + peers.join('、'),
+        index && '指数2分钟 ' + signed(index.pct) + '%' + (index.above_p95 ? ' · 超P95' : ''),
+      ].filter(Boolean);
+      const last = event.last <= cutoff ? event.last : signal.end;
+      details.set(event.id, signal);
+      return `<tr><td>${esc(knownNames.get(event.symbol) || event.symbol)} <small>${esc(event.symbol)}</small></td>
+        <td>${esc(event.first)} / ${esc(last)}</td><td>${levels[signal.level]}${event.recovered && !burst.replay ? ' · 补数' : ''}</td>
+        <td><button type="button" data-burst-id="${esc(event.id)}" title="窗口成交量 ${fmt(signal.volume, 0)} 份">${esc(signal.start)}–${esc(signal.end)}</button></td>
+        <td>${pair(signal.ratios)}</td><td>${pair(signal.daily, 'pct')}</td><td>${esc(evidence.join(' · ') || '—')}</td></tr>`;
+    }).join('');
+    const now = new Date(Date.now() + 8 * 3600000).toISOString().slice(11,16);
+    const continuous = (now >= '09:32' && now <= '11:30') || (now >= '13:02' && now <= '14:57');
+    const lag = (Date.now() - Date.parse(burst.date + 'T' + (burst.through || '00:00') + ':00+08:00')) / 1000;
+    const phase = burst.replay ? '历史回放' : continuous && lag > 150 ? '分钟行情延迟' : 'RQData 实时推送';
+    $('burstStatus').textContent = phase +
+      ' · ' + burst.date + ' · 同窗 P' + Math.round(burst.quantile * 100) + ' · 截至 ' +
+      (burst.replay ? cutoff : burst.through || '—') + ' · ' + rows.length + ' 条疑似集中交易事件' +
+      (burst.baseline_ready === false ? ' · 历史基准待齐' : '');
+    renderBurstDetail();
+  }
+  function renderBurstDetail() {
+    const signal = details.get(selected), node = $('burstDetail');
+    node.hidden = !signal?.minutes || !globalThis.echarts;
+    if (node.hidden) return;
+    const color = document.documentElement.dataset.theme === 'dark' ? '#dfedf0' : '#163039';
+    const [h,m] = signal.start.split(':').map(Number);
+    const slots = signal.minutes.map((_,i) =>
+      String(h + Math.floor((m+i)/60)).padStart(2,'0') + ':' + String((m+i)%60).padStart(2,'0'));
+    burstChart ||= globalThis.echarts.init(node);
+    burstChart.resize();
+    burstChart.setOption({animation:false,textStyle:{color},legend:{textStyle:{color}},
+      grid:{top:42,bottom:24,left:52,right:25,containLabel:true},tooltip:{trigger:'axis',confine:true},
+      xAxis:{type:'category',data:slots,axisLabel:{color}},
+      yAxis:{type:'value',name:'万份',axisLabel:{color},nameTextStyle:{color}},
+      series:[{name:'分钟成交量',type:'bar',data:signal.minutes.map(v=>v/10000)},
+        ...[0,1].map(i=>({name:[20,60][i]+'日同分钟基准',type:'line',
+          data:signal.minute_refs.map(v=>v[i] == null ? null : v[i]/10000)}))]},{notMerge:true});
+  }
+  function chirp() {
+    if (!sound || audio?.state !== 'running') return;
+    const oscillator = audio.createOscillator(), gain = audio.createGain();
+    oscillator.frequency.value = 760; gain.gain.value = .08;
+    oscillator.connect(gain); gain.connect(audio.destination);
+    oscillator.start(); oscillator.stop(audio.currentTime + .16);
+  }
+  async function selectBurst() {
+    const revision = ++choice, date = $('burstDate').value;
+    eventStream?.close(); eventStream = null;
+    burst = null;
+    selected = null;
+    $('burstDetail').hidden = true;
+    $('burstEvents').replaceChildren();
+    $('burstTimeLabel').hidden = !date;
+    $('burstSound').disabled = !!date;
+    $('burstStatus').textContent = '等待分钟行情';
+    if (date) {
+      try {
+        const response = await fetch('/api/etf-burst?date=' + encodeURIComponent(date));
+        if (!response.ok) throw new Error();
+        const value = await response.json();
+        if (revision === choice) { burst = value; renderBurst(); }
+      } catch { if (revision === choice) $('burstStatus').textContent = '该日事件归档暂不可用'; }
+      return;
+    }
+    if (!('EventSource' in window)) { $('burstStatus').textContent = '浏览器暂时无法接收实时事件'; return; }
+    let settled = false;
+    eventStream = new EventSource('/api/etf-burst/stream');
+    eventStream.addEventListener('burst', message => {
+      if (revision !== choice) return;
+      const value = JSON.parse(message.data);
+      const known = new Map((burst?.events || []).map(event => [event.id, event.level]));
+      if (settled && value.events.some(event => !event.recovered && event.detected_at &&
+          Date.now() - Date.parse(event.detected_at) < 15000 && event.level >= 2 && event.level > (known.get(event.id) || 0))) chirp();
+      burst = value;
+      settled = true;
+      renderBurst();
+    });
+    eventStream.onerror = () => {
+      settled = false;
+      if (revision === choice) $('burstStatus').textContent = '实时事件连接中断，正在重连';
+    };
+  }
+  async function openBurst() {
+    try {
+      const response = await fetch('/api/etf-burst/dates');
+      if (!response.ok) return;
+      const {dates} = await response.json();
+      for (const date of dates) $('burstDate').add(new Option('回放 ' + date, date));
+      $('etfBurst').hidden = false;
+      burstEnabled = true;
+      selectBurst();
+    } catch {}
+  }
+  $('burstDate').addEventListener('change', selectBurst);
+  $('burstTime').addEventListener('change', renderBurst);
+  $('burstEvents').addEventListener('click', event => {
+    const button = event.target.closest('[data-burst-id]');
+    if (button) { selected = button.dataset.burstId; renderBurstDetail(); }
+  });
+  window.addEventListener('resize', () => { if (!$('burstDetail').hidden) burstChart?.resize(); });
+  window.addEventListener('ftshare:theme-change', renderBurstDetail);
+  $('burstSound').addEventListener('click', async () => {
+    try {
+      if (!sound) {
+        audio ||= new AudioContext();
+        await audio.resume();
+      }
+      sound = !sound;
+      $('burstSound').setAttribute('aria-pressed', String(sound));
+      $('burstSound').textContent = sound ? '关闭提示音' : '开启提示音';
+    } catch { $('burstSound').textContent = '提示音不可用'; }
+  });
+  if (document.documentElement.dataset.dataMode !== 'demo') openBurst();
   function render(nextSeed = seed, nextLive = live) {
     seed = nextSeed; live = nextLive; if (!seed || !live) return;
     const s = evaluateRadar(seed, live, { at, cumulative: number('radarCumThreshold', RADAR_DEFAULTS.cumulative, 1.1, 5), burst: number('radarBurstThreshold', RADAR_DEFAULTS.burst, 1.2, 10), fundFlow: number('radarFlowThreshold', RADAR_DEFAULTS.fundFlow, 1, 100) });
@@ -27,6 +170,10 @@ export function createRadar(root) {
     $('radarBurst').innerHTML = fmt(s.recent.short.ratio, 2) + '<em> / </em>' + fmt(s.long.short.ratio, 2) + '<em>×</em>'; $('radarBurstNote').textContent = s.short.range ? seed.minute_slots[s.short.range[0]] + '—' + s.time + ' · ' + fmt(s.short.amount) + '亿' : '当前时段未满5分钟';
     $('radarIndex').textContent = signed(s.indexPct) + (s.indexPct === null ? '' : '%'); $('radarIndex').className = s.indexPct > 0 ? 'positive' : s.indexPct < 0 ? 'negative' : '';
     $('radarTime').max = Math.max(0, s.last); $('radarTime').value = Math.max(0, s.end); $('radarTimeLabel').textContent = s.time || '—'; $('radarFollow').classList.toggle('is-following', at === null);
+    if (burstEnabled && burst?.replay && burst.date === live.date && at !== null && s.time) {
+      $('burstTime').value = s.time;
+      renderBurst();
+    }
     $('radarSamples').textContent = [s.recent,s.long].map(b => b.window + '日基准：' + b.samples + '/' + b.window + '日' + (b.samples ? '（' + b.sampleDates.at(-1) + '—' + b.sampleDates[0] + '）' : '')).join('；') + '。仅使用观察日之前的完整快照。';
     $('radarFundDates').textContent = '行情 ' + live.date + ' ' + (live.last_complete_minute || '—') + ' ｜ 净申赎归属 ' + (s.flowDate || '待归档') + '，与回放时点分开展示';
     $('radarFundCounts').innerHTML = `<span class="flow-creation">净申购偏大 ${s.creations}只</span><span class="flow-redemption">净赎回偏大 ${s.redemptions}只</span>`;

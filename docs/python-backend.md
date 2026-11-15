@@ -15,7 +15,7 @@ $env:PORT = '8082'
 & .\scripts\python-backend.ps1 web
 ```
 
-在另一个终端启动 `& .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')`。盘中采集应保持单个进程，每分钟更新同一份缓存。验收阶段可为 Python 和原 Node 服务分别指定输出路径。
+在另一个终端启动 `& .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')`。Python 盘中采集使用 RQData `LiveMarketDataClient` 订阅分钟线和 tick，一个进程向现有看板和逐只 ETF 事件雷达发布结果。浏览器继续通过 `/api/live` 读取共享缓存。开市前启动可预载基准，开市中启动或断线时可用 RQData 分钟线补齐已结束分钟。
 
 Linux 或已配置 SDK 凭据的 Python 环境可直接运行以下命令。环境变量只在相应组件的服务配置中设置，网页应使用只读的快照路径。
 
@@ -34,6 +34,14 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 ```powershell
 & .\scripts\python-backend.ps1 -Mode live -Arguments @('--replay=2026-11-13','--cache=.local/python-rqdata-replay.json')
 ```
+
+逐只 ETF 放量也支持独立回放。指定一个交易日或通过 `--start` 和 `--end` 补多个日期。启动网页后，在 ETF 异动雷达选择日期和回放时点。普通分时回放与放量事件回放可同时使用。
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode burst-replay -Arguments @('--start=2026-11-12','--end=2026-11-13')
+```
+
+Linux 对应命令为 `python -m etf_backend.collect burst-replay --end=2026-11-13`。已有 RQData 成交量导出时，可以用 `--burst-input` 离线回放，输入 JSON 包含 `1m` 和 `1d` 两组 `[symbol, date, slot, volume]`。采集和网页共用 `ETF_BURST_DIR`。默认参数在 `config/etf-burst.json`，自定义文件通过 `ETF_BURST_CONFIG` 或 `--burst-config` 指定。实时和历史快照分目录保存，历史日期和事件接口为 `/api/etf-burst/dates` 和 `/api/etf-burst?date=YYYY-MM-DD`。实时接口为 `/api/etf-burst/stream`，代理须关闭 SSE 响应缓冲。详细口径见 [盘中放量研究](etf-intraday-burst-research.md)。
 
 ## API 与部署
 

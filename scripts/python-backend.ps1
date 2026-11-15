@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay')][string]$Mode,
     [string]$ReplayCache,
     [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
 )
@@ -10,7 +10,7 @@ $settings = @{}
 try {
     if (Test-Path -LiteralPath '.env') {
         foreach ($line in Get-Content -LiteralPath '.env') {
-            if ($line -match '^\s*(RQDATA_PYTHON|RQDATA_CREDENTIAL_FILE|DATA_MODE|ENABLE_RADAR|FTSHARE_SEED_FILE|FTSHARE_LIVE_CACHE_FILE|MARKET_DATA_CONFIG_FILE|CROWDING_FILE|HOST|PORT)\s*=\s*(.*?)\s*$') {
+            if ($line -match '^\s*(RQDATA_PYTHON|RQDATA_CREDENTIAL_FILE|DATA_MODE|ENABLE_RADAR|FTSHARE_SEED_FILE|FTSHARE_LIVE_CACHE_FILE|MARKET_DATA_CONFIG_FILE|CROWDING_FILE|ETF_BURST_DIR|ETF_BURST_CONFIG|HOST|PORT)\s*=\s*(.*?)\s*$') {
                 $name = $Matches[1]
                 $value = $Matches[2].Trim('"', "'")
                 if (!(Test-Path "Env:$name")) {
@@ -39,7 +39,7 @@ try {
         $port = if ($env:PORT) { $env:PORT } else { '8082' }
         & $python -B -m uvicorn etf_backend.web:app --host $address --port $port @Arguments
     } else {
-        if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE) {
+        if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE -and !($Arguments -match '^--burst-input(?:=|$)')) {
             $secure = ConvertTo-SecureString ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $env:RQDATA_CREDENTIAL_FILE).Path))
             $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
             try { $env:RQDATAC2_CONF = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }

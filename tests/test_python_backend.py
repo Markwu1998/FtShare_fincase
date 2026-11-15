@@ -1,16 +1,126 @@
 from copy import deepcopy
+import json
 from pathlib import Path
 import tempfile
 import unittest
 
 from etf_backend.collect import ROOT, history_snapshot, publish, read, validate_replacement
+from etf_backend.burst import BurstDay, detect, quantile, total_window
 from etf_backend.crowding import add_percentiles, basket_total, turnover_metrics
 from etf_backend.crowding_extra import released_values, shsz_symbol
-from etf_backend.model import BASKET, INDEX, fund_flows
+from etf_backend.model import BASKET, INDEX, SLOTS, fund_flows
+from etf_backend.realtime import PushSession, feed_time
 from etf_backend.web import Archive, validate_seed
 
 
 class BackendTests(unittest.TestCase):
+    def test_burst_direct_confirmation_and_replay_bounds(self):
+        symbol = BASKET[0]
+        daily = [1000, 1000]
+        baseline = {symbol: (daily, {(k, i): ([1, 2], [1, 1]) for k in (1, 2, 5, 10) for i in range(240)})}
+        state = BurstDay("2026-11-13", baseline, .75)
+        for slot, count in zip(SLOTS[:5], [1, 1, 1, 1, 120]):
+            state.add(symbol, slot, count, recovered=True)
+        self.assertEqual([(e["first"], e["level"], e["recovered"]) for e in state.events],
+                         [("09:35", 2, True)])
+        state.add(symbol, "09:34", 9999)
+        state.add(symbol, "09:35", 9999)
+        self.assertEqual(len(state.events), 1)
+        state.add(symbol, "09:38", 1100)
+        self.assertEqual(len(state.events), 1)
+        self.assertIsNone(total_window(state.values[symbol], SLOTS.index("13:01"), 2))
+        self.assertIsNone(total_window([1] * 240, SLOTS.index("14:58"), 5))
+        self.assertEqual(quantile([0, 10, 20, 30], .75), 22.5)
+        self.assertEqual(feed_time(20261113093500000).isoformat(), "2026-11-13T09:35:00+08:00")
+        self.assertIsNone(detect([0, 0, 0, 0, 120], 4, (daily, {})))
+
+    def test_burst_replay_endpoint_serves_archives_without_etf_seed(self):
+        from starlette.requests import Request
+        from etf_backend.web import create_app
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            publish(root / "replay/2026-11-13.json", {"provider": "RQData", "date": "2026-11-13",
+                    "replay": True, "events": [], "updated_at": "2026-11-13T15:00:00Z"})
+            app = create_app("live", seed_file=root / "missing.json", burst_dir=root, radar=True)
+            endpoint = next(r.endpoint for r in app.routes if r.path == "/{path:path}")
+            def request(path, query=b""):
+                return endpoint(path, Request({"type": "http", "path": "/" + path, "query_string": query, "headers": []}))
+            self.assertEqual(json.loads(request("api/etf-burst/dates").body), {"dates": ["2026-11-13"]})
+            self.assertTrue(json.loads(request("api/etf-burst", b"date=2026-11-13").body)["replay"])
+            self.assertEqual(request("api/etf-burst", b"date=../live").status_code, 400)
+
+    def test_push_updates_existing_board_and_separate_burst_archive(self):
+        from datetime import datetime, timedelta
+        from unittest.mock import patch
+        from etf_backend.provider import CHINA
+
+        day = (datetime.now(CHINA) - timedelta(days=1)).date().isoformat()
+        anchor = (datetime.fromisoformat(day) - timedelta(days=1)).date().isoformat()
+        start = datetime.fromisoformat(day + "T09:31:00").replace(tzinfo=CHINA)
+        class Feed:
+            def get_trading_dates(self, *_):
+                return [anchor, day]
+
+            def get_price(self, *_args, **_kwargs):
+                return None
+
+        funds = [f for f in read(ROOT / "config/universe.json")["funds"] if f["symbol"] in BASKET]
+        reference = {(length, i): ([1, 2], [1, 1]) for length in (1, 2, 5, 10) for i in range(240)}
+        with tempfile.TemporaryDirectory() as directory, patch("etf_backend.realtime.provider.bars",
+                return_value=[(symbol, 0, 1, 0) for symbol in BASKET + [INDEX]]):
+            root = Path(directory)
+            session = PushSession(Feed(), day, funds, root / "board.json", root, .75)
+            session.detector.baseline = {s: ([1000, 1000], reference) for s in BASKET}
+            for i in range(5):
+                t = start + timedelta(minutes=i)
+                for s in BASKET + [INDEX]:
+                    volume = 1000 if s == BASKET[0] and i == 4 else 1
+                    code = s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE")
+                    dt = t.strftime("%Y%m%d%H%M%S") + "000"
+                    bar = {"channel": "bar_" + code, "order_book_id": code, "datetime": int(dt),
+                           "close": 1, "total_turnover": volume, "volume": volume}
+                    self.assertTrue(session.handle(bar, "test"))
+                    session.handle({**bar, "volume": 99999, "total_turnover": 99999}, "test")
+                    if s != INDEX:
+                        session.handle({**bar, "channel": "tick_" + code, "last": 1}, "test")
+            session.flush()
+            live = read(root / "live.json")
+            value = json.loads(read(root / "board.json")["entries"]["live:rqdata:snapshot"])["value"]
+            self.assertEqual(live["events"][-1]["level"], 3)
+            self.assertEqual(live["through"], "09:35")
+            self.assertEqual(value["last_complete_minute"], "09:35")
+            self.assertEqual(value["feed"], "push")
+            self.assertEqual(value["coverage"][:5], [20] * 5)
+
+    def test_event_stream_reconnect_skips_last_seen_update(self):
+        import asyncio
+        from datetime import datetime
+        from etf_backend.provider import CHINA
+        from etf_backend.web import create_app
+
+        class Request:
+            headers = {"last-event-id": "v1"}
+
+            async def is_disconnected(self):
+                return False
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = {"provider": "RQData", "date": datetime.now(CHINA).date().isoformat(),
+                        "events": [], "updated_at": "v1"}
+            publish(root / "live.json", snapshot)
+            app = create_app("live", radar=True, burst_dir=root)
+            endpoint = next(r.endpoint for r in app.routes if r.path == "/api/etf-burst/stream")
+            async def check():
+                result = await endpoint(Request())
+                stream = result.body_iterator
+                self.assertEqual(await stream.__anext__(), ": heartbeat\n\n")
+                publish(root / "live.json", {**snapshot, "updated_at": "v2"})
+                self.assertIn("id: v2\nevent: burst", await stream.__anext__())
+                await stream.aclose()
+            asyncio.run(check())
+
     def test_macro_ratios_respect_release_date_and_contiguous_quarters(self):
         events = [
             ("2024-04-16", "2024-03-31", 2),

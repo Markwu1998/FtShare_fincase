@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from time import sleep
 import io
 
 from . import provider
@@ -224,7 +223,7 @@ def live_run(api, funds, path, replay=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["history", "live", "crowding"])
+    parser.add_argument("mode", choices=["history", "live", "crowding", "burst-replay"])
     parser.add_argument("--end", type=lambda s: datetime.fromisoformat(s).date().isoformat(),
                         default=datetime.now(provider.CHINA).date().isoformat())
     parser.add_argument("--seed", default=os.environ.get("FTSHARE_SEED_FILE", "data/private/rqdata-seed.json"))
@@ -234,15 +233,42 @@ def main():
     parser.add_argument("--crowding-file", default=os.environ.get("CROWDING_FILE"))
     parser.add_argument("--crowding-module", choices=["daily", "industry", "funds", "financing"], default="daily")
     parser.add_argument("--watch", action="store_true")
+    parser.add_argument("--burst-dir", default=os.environ.get("ETF_BURST_DIR", "data/private/etf-burst"))
+    parser.add_argument("--burst-config", default=os.environ.get("ETF_BURST_CONFIG", "config/etf-burst.json"))
+    parser.add_argument("--burst-input", help="Use a local RQData volume export for an offline burst replay")
     parser.add_argument("--replay", type=lambda s: datetime.fromisoformat(s).date().isoformat())
     args = parser.parse_args()
     if args.replay and (args.mode != "live" or args.watch or Path(args.cache).resolve() ==
                         Path(os.environ.get("FTSHARE_LIVE_CACHE_FILE", "data/private/rqdata-live.json")).resolve()):
         parser.error("Replay requires live mode and an explicit separate --cache")
     try:
+        from .burst import query_history, replay_day
+        if args.mode in {"live", "burst-replay"}:
+            burst_dir = ROOT / args.burst_dir
+            q = read(ROOT / args.burst_config)["volume_window_quantile"]
+            if not finite(q) or not 0 < q < 1:
+                raise ValueError("volume_window_quantile must be between 0 and 1")
+        if args.mode == "burst-replay" and args.burst_input:
+            from .burst import SLOT_INDEX
+            source = read(args.burst_input)
+            minutes, daily = {}, {}
+            for symbol, day, slot, volume in source["1m"]:
+                minutes.setdefault(day, {}).setdefault(symbol, [None] * len(SLOTS))[SLOT_INDEX[slot]] = volume
+            for symbol, day, _, volume in source["1d"]:
+                daily.setdefault(day, {})[symbol] = volume
+            run_burst_replay(args, burst_dir, q, sorted(daily), minutes, daily, replay_day)
+            return
         import rqdatac
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rqdatac.init(connect_timeout=8, timeout=40)
+        if args.mode == "burst-replay":
+            start = args.start or args.end
+            warm = before(start, 130)
+            end = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
+            calendar = [str(day) for day in rqdatac.get_trading_dates(warm, end)]
+            minutes, daily = query_history(rqdatac, warm, end)
+            run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day)
+            return
         if args.mode == "crowding":
             from .crowding import DEFAULT_PATH, update
             from .crowding_extra import update_extra
@@ -283,19 +309,28 @@ def main():
             publish(args.seed, snapshot)
             print(json.dumps({"market_through": snapshot["latest_market_date"], "flow_through": snapshot["latest_flow_date"],
                               "minute_days": len(snapshot["minutes"])}))
+        elif args.replay:
+            live_run(rqdatac, universe["funds"], args.cache, args.replay)
         else:
-            while True:
-                try:
-                    live_run(rqdatac, universe["funds"], args.cache, args.replay)
-                except Exception:
-                    if not args.watch:
-                        raise
-                    print("RQData live collection failed; retaining last good snapshot", flush=True)
-                if not args.watch:
-                    break
-                sleep(60)
+            from .realtime import watch
+            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch)
     except Exception as error:
         parser.exit(1, f"RQData {args.mode} failed ({type(error).__name__}). Check configuration and data coverage.\n")
+
+
+def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day):
+    dates = [day for day in calendar if (args.start or args.end) <= day <= args.end]
+    if not dates:
+        raise ValueError("No requested replay dates in volume data")
+    count = elevated = 0
+    for day in dates:
+        archive = replay_day(day, calendar, minutes, daily, q)
+        if archive["through"] is None:
+            raise ValueError(f"Missing replay minutes for {day}")
+        publish(burst_dir / "replay" / f"{day}.json", archive)
+        count += len(archive["events"])
+        elevated += sum(e["level"] >= 2 for e in archive["events"])
+    print(json.dumps({"days": len(dates), "events": count, "confirmed_or_extreme": elevated}), flush=True)
 
 
 def validate_replacement(previous, current):

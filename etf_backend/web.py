@@ -1,4 +1,6 @@
 """FastAPI server for the existing dashboard and read-only HTTP API."""
+from asyncio import sleep
+from contextlib import suppress
 from datetime import datetime, timezone
 import json
 from math import sin
@@ -8,12 +10,15 @@ from threading import Lock
 from statistics import mean, pstdev
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
+from .burst import DEFAULT_DIR as BURST_DIR
 from .collect import ROOT, read
 from .crowding import DEFAULT_PATH as CROWDING_PATH, validate_snapshot as validate_crowding
 from .crowding_extra import MODULES, path_for, validate_extra
 from .model import BASKET, CATEGORIES, DEFAULT_STATUS, FORMULA, SLOTS, finite
+from .provider import CHINA
 
 ASSETS = {
     "/style.css": "src/style.css", "/echarts.min.js": "src/echarts.min.js",
@@ -113,7 +118,14 @@ def validate_cache(value):
     return entry
 
 
-def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_replay=None, crowding_file=None):
+def validate_burst(value):
+    if value["provider"] != "RQData" or not isinstance(value["events"], list) or not value["updated_at"]:
+        raise ValueError("Invalid ETF event archive")
+    return value
+
+
+def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_replay=None, crowding_file=None,
+               burst_dir=None):
     mode = mode or os.environ.get("DATA_MODE", "demo")
     if mode not in {"demo", "live"}:
         raise ValueError("Invalid DATA_MODE")
@@ -132,6 +144,8 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
     crowding_modules = {module: Archive(path_for(module, crowding_path),
                                         lambda value, module=module: validate_extra(value, module))
                         for module in MODULES}
+    event_dir = ROOT / (burst_dir or os.environ.get("ETF_BURST_DIR") or BURST_DIR)
+    events = Archive(event_dir / "live.json", validate_burst)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     index = (ROOT / "src/index.html").read_text(encoding="utf-8").replace(
         'data-data-mode="demo"', f'data-data-mode="{mode}"').replace(
@@ -155,6 +169,31 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
     def error(message, code, status):
         return response({"error": message, "code": code}, status)
 
+    def current_events():
+        snapshot = events.load()
+        if snapshot and snapshot["date"] == datetime.now(CHINA).date().isoformat():
+            return snapshot
+        return None
+
+    @app.get("/api/etf-burst/stream")
+    async def event_stream(request: Request):
+        if demo or not radar:
+            return error("实时监控未启用", "burst_disabled", 404)
+
+        async def stream():
+            previous = request.headers.get("last-event-id", "")[:80]
+            while not await request.is_disconnected():
+                snapshot = await run_in_threadpool(current_events)
+                if snapshot and snapshot["updated_at"] != previous:
+                    previous = snapshot["updated_at"]
+                    yield f"id: {previous}\nevent: burst\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+                else:
+                    yield ": heartbeat\n\n"
+                await sleep(1)
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     @app.api_route("/{path:path}", methods=["GET", "HEAD"])
     def route(path: str, request: Request):
         if len(request.url.query) > 256:
@@ -164,6 +203,22 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             return HTMLResponse(index, headers={"Cache-Control": "no-cache"})
         if key in {"/crowding", "/crowding/"}:
             return HTMLResponse(crowding_page, headers={"Cache-Control": "no-cache"})
+        if key in {"/api/etf-burst", "/api/etf-burst/dates"}:
+            if demo or not radar:
+                return error("盘中放量监控未启用", "burst_disabled", 404)
+            if key.endswith("/dates"):
+                dates = sorted((p.stem for p in (event_dir / "replay").glob("????-??-??.json")), reverse=True)
+                return response({"dates": dates})
+            day = request.query_params.get("date", "")
+            snapshot = None
+            if day:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                    return error("查询日期无效", "invalid_date", 400)
+                with suppress(OSError, ValueError, KeyError, TypeError):
+                    snapshot = validate_burst(read(event_dir / "replay" / f"{day}.json"))
+            else:
+                snapshot = current_events()
+            return response(snapshot) if snapshot else error("暂无盘中放量归档", "burst_not_ready", 503)
         if key.startswith("/api/crowding/"):
             module = key.removeprefix("/api/crowding/")
             if module not in crowding_modules:

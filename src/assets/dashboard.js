@@ -292,6 +292,7 @@ async function refresh(){
   live=combineLive(next,live);if(!live.replay)save('ftshare-last-live-v1',live);safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);safely('日度图表',renderDaily);if(radar)safely('异动雷达',()=>radar.render(seed,live));
   if(live.replay)tag('tagUpdate','历史回放 '+live.date+' '+live.last_complete_minute,'warn');
   else if(live.provider==='RQData'&&live.cache?.stale)tag('tagUpdate','行情已陈旧 · '+live.date+' '+live.last_complete_minute,'warn');
+  else if(live.feed==='push')tag('tagUpdate','RQData 实时推送 · 分钟截至 '+live.last_complete_minute,'ok');
   if(live.cache?.last_error&&live.cache.last_error!=='partial_upstream')tag('tagUpdate','云端采集暂缓；行情保留至 '+live.date+' '+(live.last_complete_minute||'--'),'warn');
 }catch(e){tag('tagUpdate',live?'缓存读取暂缓；保留 '+live.date+' '+(live.last_complete_minute||'')+' 的成功数据':'分时和成交雷达等待盘中采集；日度及历史图表可继续查看','warn');}
  finally{loading=false;}
