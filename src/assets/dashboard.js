@@ -286,7 +286,8 @@ function renderCloudStatus(){
 async function refresh(){
  if(loading)return;loading=true;
  try{
-  if(!seed.demo){const health=await get('/api/health');if(health.history_built_at!==seed.built_at){seed=await get('/api/board');if(!matchingLive(live))live=null;save('ftshare-board-v1',seed);renderSource();renderCloudStatus();renderDaily();for(const d of Object.keys(seed.minutes).sort().reverse())if(!$('cumDate').querySelector('option[value="'+d+'"]')){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').insertBefore(op,$('cumDate').options[1]||null);}}}
+  const health=await get('/api/health'),switched=(health.mode==='demo')!==Boolean(seed.demo);
+  if(switched||health.history_built_at!==seed.built_at){seed=await get('/api/board');if(!matchingLive(live))live=null;save('ftshare-board-v1',seed);renderSource();renderCloudStatus();renderDaily();for(const d of Object.keys(seed.minutes).sort().reverse())if(!$('cumDate').querySelector('option[value="'+d+'"]')){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').insertBefore(op,$('cumDate').options[1]||null);}}
   const next=await get('/api/live');
   if(!matchingLive(next))throw new Error('行情与历史快照口径不一致');
   live=combineLive(next,live);if(!live.replay)save('ftshare-last-live-v1',live);safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);safely('日度图表',renderDaily);if(radar)safely('异动雷达',()=>radar.render(seed,live));
@@ -299,7 +300,8 @@ async function refresh(){
 }
 function tick(){
  if(loading)return;remaining--;const hm=cst().slice(11,16),day=new Date(Date.now()+8*3600000).getUTCDay(),trading=day>0&&day<6&&((hm>='09:15'&&hm<='11:35')||(hm>='12:55'&&hm<='15:10'));
- tag('tagCountdown',(trading?'盘中':'非交易时段')+' · '+Math.max(0,remaining)+'秒后读取缓存');
+ if(seed.demo)tag('tagCountdown','离线演示 · 固定样本 · '+Math.max(0,remaining)+'秒后检查');
+ else tag('tagCountdown',(trading?'盘中':'非交易时段')+' · '+Math.max(0,remaining)+'秒后读取缓存');
  if(remaining<=0){remaining=trading?60:300;refresh();}
 }
 window.addEventListener('ftshare:theme-change',()=>{if(!seed)return;safely('主题切换',renderDaily);if(live)safely('实时图表',renderMinute);safely('累计图表',renderCum);});
@@ -333,6 +335,6 @@ try{
  window.addEventListener('resize',()=>Object.values(charts).forEach(c=>c.resize()));
  await refresh();window.__ETF_APP_READY=true;
  const s=document.createElement('script');s.src='/assets/brush.js';document.head.appendChild(s);brushLoaded=true;
- remaining=60;if(!seed.demo)setInterval(tick,1000);else tag('tagCountdown','离线演示 · 固定样本');
+ remaining=60;setInterval(tick,1000);
 }catch(e){tag('tagUpdate','看板加载失败：'+e.message,'err');console.error('Dashboard initialization failed');}
 })();

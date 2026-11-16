@@ -9,7 +9,9 @@ Push-Location (Split-Path $PSScriptRoot)
 try {
     $path = $env:RQDATA_CREDENTIAL_FILE
     if (!$path -and (Test-Path -LiteralPath '.env')) {
-        foreach ($line in Get-Content -LiteralPath '.env') {
+        # Read as UTF-8: Windows PowerShell 5.1 defaults to the ANSI code page,
+        # which turns non-ASCII comments into mojibake that can swallow the next line.
+        foreach ($line in Get-Content -LiteralPath '.env' -Encoding UTF8) {
             if ($line -match '^\s*RQDATA_CREDENTIAL_FILE\s*=\s*(.+?)\s*$') { $path = $Matches[1].Trim('"', "'") }
         }
     }

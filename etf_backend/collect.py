@@ -156,7 +156,7 @@ def history_snapshot(market, records, universe, config, end, closes=None):
                              "missing_days": sum(d <= latest and value is None for d, value in zip(broad["dates"], broad["total"]))}}
 
 
-def live_snapshot(result, funds, date, replay):
+def live_snapshot(result, funds, date, replay, close=False):
     if date not in result["calendar"]:
         return None
     rows = [row for row in result["minutes"] if stamp(row[1]).date().isoformat() == date]
@@ -181,7 +181,7 @@ def live_snapshot(result, funds, date, replay):
                       "pct": (close / prior - 1) * 100 if finite(prior) and prior > 0 else None})
     minute = SLOTS[complete[-1]]
     end = datetime.fromisoformat(date + "T" + minute).replace(tzinfo=provider.CHINA).timestamp()
-    observed = end if replay else min(end, *(quotes[s][0] / 1000 for s in BASKET))
+    observed = end if (replay or close) else min(end, *(quotes[s][0] / 1000 for s in BASKET))
     value = {"provider": "RQData", "formula": FORMULA, "warnings": [], "date": date, "slots": SLOTS,
              "fetched_at": iso_utc(datetime.fromtimestamp(observed, timezone.utc)), "bars": bars,
              "coverage": coverage, "closes": [index.get(s) for s in SLOTS], "pre_close": previous[INDEX],
@@ -233,6 +233,10 @@ def main():
     parser.add_argument("--crowding-file", default=os.environ.get("CROWDING_FILE"))
     parser.add_argument("--crowding-module", choices=["daily", "industry", "funds", "financing"], default="daily")
     parser.add_argument("--watch", action="store_true")
+    parser.add_argument("--close", action="store_true",
+                        help="One-shot end-of-day snapshot: rebuild today's full minute cache without the replay flag")
+    parser.add_argument("--recent", action="store_true",
+                        help="Re-collect the recent overlap window and merge it into the existing history snapshot")
     parser.add_argument("--burst-dir", default=os.environ.get("ETF_BURST_DIR", "data/private/etf-burst"))
     parser.add_argument("--burst-config", default=os.environ.get("ETF_BURST_CONFIG", "config/etf-burst.json"))
     parser.add_argument("--burst-input", help="Use a local RQData volume export for an offline burst replay")
@@ -241,6 +245,8 @@ def main():
     if args.replay and (args.mode != "live" or args.watch or Path(args.cache).resolve() ==
                         Path(os.environ.get("FTSHARE_LIVE_CACHE_FILE", "data/private/rqdata-live.json")).resolve()):
         parser.error("Replay requires live mode and an explicit separate --cache")
+    if args.close and (args.mode != "live" or args.watch or args.replay):
+        parser.error("--close is a one-shot live operation and cannot be combined with --watch or --replay")
     try:
         from .burst import query_history, replay_day
         if args.mode in {"live", "burst-replay"}:
@@ -278,7 +284,20 @@ def main():
             print(json.dumps({"days": len(snapshot["rows"]), "through": snapshot["rows"][-1]["date"]}))
             return
         universe = read(ROOT / "config/universe.json")
-        if args.mode == "history":
+        if args.close:
+            # Repair/complete today's intraday cache after the close using 1m bars.
+            day = datetime.now(provider.CHINA).date().isoformat()
+            rows = provider.collect(rqdatac, {"kind": "replay", "as_of": day + "T15:05:00",
+                                              "symbols": BASKET + [INDEX]})
+            value = live_snapshot(rows, universe["funds"], day, False, close=True)
+            if not value:
+                raise ValueError("Close snapshot is incomplete")
+            cache = read(args.cache) if Path(args.cache).exists() else {"schema": 1, "entries": {}}
+            cache["entries"]["live:rqdata:snapshot"] = json.dumps(
+                {"value": value, "checked_at": iso_utc(datetime.now(timezone.utc))}, ensure_ascii=False)
+            publish(args.cache, cache)
+            print(json.dumps({"date": value["date"], "through": value["last_complete_minute"], "close": True}))
+        elif args.mode == "history":
             previous = read(args.seed) if Path(args.seed).is_file() else None
             config = read(ROOT / "config/collection.json")
             if args.config:
@@ -294,6 +313,14 @@ def main():
             for fund in universe["funds"]:
                 if fund["symbol"] in recoveries:
                     fund["flow_evidence"] = recoveries[fund["symbol"]]
+            recent = bool(args.recent)
+            if recent:
+                if previous is None:
+                    raise ValueError("--recent requires an existing snapshot; run one full history first")
+                anchor = previous["latest_market_date"] or previous["latest_flow_date"]
+                cutoff = max(config["flow_start"], config["market_start"], before(anchor, 14))
+                # Only the overlap window is re-queried; merge_history keeps older days.
+                config = {**config, "flow_start": cutoff, "market_start": cutoff}
             start = before(min(config["flow_start"], config["market_start"]), 14)
             market = provider.collect(rqdatac, {"kind": "history", "symbols": BASKET + [INDEX], "start": start,
                                                 "end": args.end, "market_start": config["market_start"],
@@ -304,11 +331,14 @@ def main():
             snapshot = history_snapshot(market, funds, universe, config, args.end, closes)
             if any(metric["latest"] is None for metric in snapshot["broad_metrics"].values()):
                 raise ValueError("RQData broad metrics contain no valid data")
+            if recent:
+                snapshot = merge_history(previous, snapshot)
             if previous is not None:
                 validate_replacement(previous, snapshot)
             publish(args.seed, snapshot)
             print(json.dumps({"market_through": snapshot["latest_market_date"], "flow_through": snapshot["latest_flow_date"],
-                              "minute_days": len(snapshot["minutes"])}))
+                              "minute_days": len(snapshot["minutes"]), "recent": recent,
+                              "broad_days": len(snapshot["broad"]["dates"])}))
         elif args.replay:
             live_run(rqdatac, universe["funds"], args.cache, args.replay)
         else:
@@ -331,6 +361,63 @@ def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day):
         count += len(archive["events"])
         elevated += sum(e["level"] >= 2 for e in archive["events"])
     print(json.dumps({"days": len(dates), "events": count, "confirmed_or_extreme": elevated}), flush=True)
+
+
+def merge_history(previous, current):
+    """Splice a recent re-collection into an existing snapshot and keep older days.
+
+    ``current`` must cover a contiguous window whose first date is later than the
+    oldest date in ``previous``. Days before that cutoff are kept verbatim; days in
+    the window are replaced by the fresh values (including upstream corrections).
+    """
+    if (previous.get("provider"), previous.get("formula"), previous.get("minute_slots")) != (
+            current["provider"], current["formula"], current["minute_slots"]):
+        raise ValueError("Incompatible previous snapshot")
+    if "broad_metrics" not in previous:
+        raise ValueError("Previous snapshot has no broad_metrics; run one full history first")
+    cutoff = current["history"]["dates"][0]
+    keep = [i for i, day in enumerate(previous["history"]["dates"]) if day < cutoff]
+    merged = {**previous, "history": {}, "broad": {}}
+    merged["history"] = {"dates": [previous["history"]["dates"][i] for i in keep] + current["history"]["dates"]}
+    for key in ("amount", "idx", "netflow", "flow_coverage", "flow_expected"):
+        merged["history"][key] = [previous["history"][key][i] for i in keep] + current["history"][key]
+    bkeep = [i for i, day in enumerate(previous["broad"]["dates"]) if day < cutoff]
+    broad = {**current["broad"]}
+    broad["dates"] = [previous["broad"]["dates"][i] for i in bkeep] + current["broad"]["dates"]
+    broad["total"] = [previous["broad"]["total"][i] for i in bkeep] + current["broad"]["total"]
+    broad["series"] = {c: [previous["broad"]["series"][c][i] for i in bkeep] + current["broad"]["series"][c]
+                       for c in CATEGORIES}
+    broad["coverage"] = {c: {key: [previous["broad"]["coverage"][c][key][i] for i in bkeep]
+                             + current["broad"]["coverage"][c][key] for key in ("valid", "expected")}
+                         for c in CATEGORIES}
+    issues = {day: rows for day, rows in previous["broad"]["issues"].items() if day < cutoff}
+    issues.update(current["broad"]["issues"])
+    broad["issues"] = issues
+    merged["broad"] = broad
+    metrics = {}
+    for name in ("size", "premium"):
+        prior, fresh = previous["broad_metrics"][name], current["broad_metrics"][name]
+        metric = {**fresh}
+        metric["total"] = [prior["total"][i] for i in bkeep] + fresh["total"]
+        metric["series"] = {c: [prior["series"][c][i] for i in bkeep] + fresh["series"][c] for c in CATEGORIES}
+        metric["valid"] = {c: [prior["valid"][c][i] for i in bkeep] + fresh["valid"][c] for c in CATEGORIES}
+        metrics[name] = metric
+    merged["broad_metrics"] = metrics
+    merged["calendar"] = sorted(set(previous.get("calendar", [])) | set(current["calendar"]))
+    minutes = dict(previous.get("minutes", {}))
+    for day, row in current["minutes"].items():
+        if row.get("quality") and day in minutes and not minutes[day].get("quality"):
+            continue
+        minutes[day] = row
+    merged["minutes"] = minutes
+    merged["core_fund_daily"] = current.get("core_fund_daily") or previous.get("core_fund_daily")
+    merged["latest_flow_date"] = current["latest_flow_date"]
+    merged["latest_market_date"] = current["latest_market_date"]
+    merged["built_at"] = current["built_at"]
+    merged["source_audit"] = {**current["source_audit"],
+                              "missing_days": sum(day <= merged["latest_flow_date"] and value is None
+                                                  for day, value in zip(broad["dates"], broad["total"]))}
+    return merged
 
 
 def validate_replacement(previous, current):

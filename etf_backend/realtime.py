@@ -3,6 +3,7 @@
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 import json
+from pathlib import Path
 from queue import Empty, Queue
 from time import monotonic, sleep
 
@@ -109,7 +110,9 @@ class PushSession:
         frame = api.get_price(list(mapping), start_date=self.day, end_date=self.day, frequency="1m",
                               fields=["close", "total_turnover", "volume"], adjust_type="none")
         if frame is not None:
-            for (code, t), row in frame.sort_index(level="date").iterrows():
+            # rqdatac 2.x names this level "datetime"; 3.x names it "date".
+            level = "date" if "date" in frame.index.names else "datetime"
+            for (code, t), row in frame.sort_index(level=level).iterrows():
                 timestamp = provider.local_time(t)
                 if timestamp < now.replace(second=0, microsecond=0):
                     self.bar(mapping[code], timestamp, provider.number(row.close),
@@ -223,7 +226,12 @@ class PushSession:
 
 def watch(api, funds, path, burst_dir, q, continuous):
     session = None
+    heartbeat = Path(path).with_name("collector.heartbeat")
     while True:
+        try:
+            heartbeat.write_text(iso_utc(datetime.now(provider.CHINA)), encoding="utf-8")
+        except OSError:
+            pass
         now = datetime.now(provider.CHINA)
         day = now.date().isoformat()
         active = trading_minute(now)

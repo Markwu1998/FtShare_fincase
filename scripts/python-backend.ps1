@@ -9,7 +9,9 @@ $previousCredential = $env:RQDATAC2_CONF
 $settings = @{}
 try {
     if (Test-Path -LiteralPath '.env') {
-        foreach ($line in Get-Content -LiteralPath '.env') {
+        # Read as UTF-8: Windows PowerShell 5.1 defaults to the ANSI code page,
+        # which turns non-ASCII comments into mojibake that can swallow the next line.
+        foreach ($line in Get-Content -LiteralPath '.env' -Encoding UTF8) {
             if ($line -match '^\s*(RQDATA_PYTHON|RQDATA_CREDENTIAL_FILE|DATA_MODE|ENABLE_RADAR|FTSHARE_SEED_FILE|FTSHARE_LIVE_CACHE_FILE|MARKET_DATA_CONFIG_FILE|CROWDING_FILE|ETF_BURST_DIR|ETF_BURST_CONFIG|HOST|PORT)\s*=\s*(.*?)\s*$') {
                 $name = $Matches[1]
                 $value = $Matches[2].Trim('"', "'")
@@ -36,7 +38,7 @@ try {
             $env:DATA_MODE = 'live'
         }
         $address = if ($env:HOST) { $env:HOST } else { '127.0.0.1' }
-        $port = if ($env:PORT) { $env:PORT } else { '8082' }
+        $port = if ($env:PORT) { $env:PORT } else { '8080' }
         & $python -B -m uvicorn etf_backend.web:app --host $address --port $port @Arguments
     } else {
         if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE -and !($Arguments -match '^--burst-input(?:=|$)')) {

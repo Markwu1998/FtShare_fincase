@@ -20,3 +20,18 @@ compose.local.yaml
 config/intraday-worker.local.jsonc
 __pycache__/
 .venv/
+
+# IDE / editors
+.idea/
+.vscode/
+
+# Python tooling
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/

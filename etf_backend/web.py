@@ -290,7 +290,10 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                 allow_replay or not live.get("replay")):
             try:
                 fetched_at = datetime.fromisoformat(live["fetched_at"].replace("Z", "+00:00"))
-                stale = (datetime.now(timezone.utc) - fetched_at).total_seconds() > 180
+                cn = datetime.now(CHINA)
+                in_session = cn.weekday() < 5 and "09:30" <= cn.strftime("%H:%M") <= "15:05"
+                # After the close the last snapshot is final, not stale.
+                stale = in_session and (datetime.now(timezone.utc) - fetched_at).total_seconds() > 180
             except (KeyError, TypeError, ValueError):
                 return error("盘中行情时间无效", "cache_not_ready", 503)
             return response({**live, "cache": {"mode": "background", "collected_at": live["fetched_at"],

@@ -115,6 +115,23 @@ def industry_rows(api, start, end):
         yield {"date": as_of, "indexes": data}
 
 
+def _holdings(fund, batch, period):
+    """Fetch holdings, isolating codes the installed fund SDK does not recognise."""
+    try:
+        return fund.get_holdings(batch, date=period)
+    except ValueError:
+        if len(batch) == 1:
+            return None
+        middle = len(batch) // 2
+        frames = [frame for frame in (_holdings(fund, batch[:middle], period),
+                                      _holdings(fund, batch[middle:], period))
+                  if frame is not None and not frame.empty]
+        if not frames:
+            return None
+        import pandas as pd
+        return pd.concat(frames)
+
+
 def fund_rows(api, start, end):
     from rqdatac_fund import fund
 
@@ -138,7 +155,7 @@ def fund_rows(api, start, end):
             positions = defaultdict(list)
             releases = {}
             for batch in batches(pool, 200):
-                frame = fund.get_holdings(batch, date=period)
+                frame = _holdings(fund, batch, period)
                 if frame is None or frame.empty:
                     continue
                 for row in frame.reset_index().itertuples(index=False):
