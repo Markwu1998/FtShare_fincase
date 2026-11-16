@@ -83,7 +83,7 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 & .\scripts\python-backend.ps1 -Mode live -Arguments @('--replay=2026-11-13','--cache=.local/python-rqdata-replay.json')
 ```
 
-逐只 ETF 放量也支持独立回放。指定一个交易日或通过 `--start` 和 `--end` 补多个日期。启动网页后，在 ETF 异动雷达选择日期和回放时点。普通分时回放与放量事件回放可同时使用。监控标的与分位参数在 `config/etf-burst.json`（`symbols`、`amount_window_quantile`），与日度核心篮子相互独立；当前按成交额计算。
+逐只 ETF 放量也支持独立回放。指定一个交易日或通过 `--start` 和 `--end` 补多个日期。启动网页后，在 ETF 异动雷达选择日期和回放时点。普通分时回放与放量事件回放可同时使用。监控标的默认与日度核心篮子一致（同一份 20 只），可在 `config/etf-burst.json` 的 `symbols` 覆盖；分位参数为 `amount_window_quantile`，按成交额计算。
 
 ```powershell
 & .\scripts\python-backend.ps1 -Mode burst-replay -Arguments @('--start=2026-11-12','--end=2026-11-13')

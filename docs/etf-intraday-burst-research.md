@@ -1,6 +1,6 @@
 # ETF 盘中放量监控研究与开发
 
-> 2026-11-16 起，线上实现改为**成交额口径**（RQData `total_turnover`），监控范围改为 `config/etf-burst.json` 的 `symbols`（当前 20 只，独立于日度核心篮子）；阈值倍数与占比规则不变。下文的成交量研究与样本保留作为方法论记录。
+> 2026-11-16 起，线上实现改为**成交额口径**（RQData `total_turnover`），监控范围与日度核心篮子统一为同一 20 只（`etf_backend/constants.json`，`config/etf-burst.json` 可单独覆盖）；阈值倍数与占比规则不变。下文的成交量研究与样本保留作为方法论记录。
 
 ## v3 · 同窗 P75 对照
 
