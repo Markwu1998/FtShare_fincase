@@ -31,12 +31,12 @@ def quantile(values, q):
     return ordered[lo] + (ordered[min(lo + 1, len(ordered) - 1)] - ordered[lo]) * (rank - lo)
 
 
-def make_baseline(days, minutes, daily, as_of, q):
+def make_baseline(days, minutes, daily, as_of, q, symbols=BASKET):
     if not finite(q) or not 0 < q < 1:
-        raise ValueError("volume_window_quantile must be between 0 and 1")
+        raise ValueError("amount_window_quantile must be between 0 and 1")
     dates = [day for day in days if day < as_of][-60:]
     result = {}
-    for symbol in BASKET:
+    for symbol in symbols:
         full = [daily.get(day, {}).get(symbol) for day in dates]
         pairs = [tuple(v for v in full[-n:] if finite(v) and v >= 0) for n in (20, 60)]
         totals = [median(v) if len(v) >= n else None for v, n in zip(pairs, (19, 55))]
@@ -85,7 +85,7 @@ def detect(values, end, baseline, shadow=False):
                     x is not None and x >= 2 for x in multiples(previous, prev_ref))
             if ready:
                 start = end - length + 1
-                return {"level": level, "window": length, "volume": row[0], "ratios": row[1], "daily": row[2],
+                return {"level": level, "window": length, "amount": row[0], "ratios": row[1], "daily": row[2],
                         "start": SLOTS[start], "end": SLOTS[end],
                         "minutes": values[start:end + 1],
                         "minute_refs": [reference.get((1, i), ([None] * 2,) * 2)[int(shadow)]
@@ -94,17 +94,17 @@ def detect(values, end, baseline, shadow=False):
 
 
 class BurstDay:
-    def __init__(self, day, baseline, quantile_value, replay=False):
+    def __init__(self, day, baseline, quantile_value, replay=False, symbols=BASKET):
         self.day, self.baseline, self.quantile, self.replay = day, baseline, quantile_value, replay
-        self.values = {s: [None] * len(SLOTS) for s in BASKET}
+        self.values = {s: [None] * len(SLOTS) for s in symbols}
         self.latest = {}
         self.events = []
         self.active = {}
         self.shadow = {}
 
-    def add(self, symbol, slot, volume, received=None, *, recovered=False):
+    def add(self, symbol, slot, amount, received=None, *, recovered=False):
         end = SLOT_INDEX.get(slot, -1)
-        if symbol not in self.values or not 0 <= end <= END or not finite(volume) or volume < 0:
+        if symbol not in self.values or not 0 <= end <= END or not finite(amount) or amount < 0:
             return
         previous = self.latest.get(symbol, -1)
         if end <= previous:
@@ -113,7 +113,7 @@ class BurstDay:
             self.active.pop(symbol, None)
         self.latest[symbol] = end
         values = self.values[symbol]
-        values[end] = volume
+        values[end] = amount
         signal = detect(values, end, self.baseline[symbol])
         shadow = detect(values, end, self.baseline[symbol], shadow=True)
         if shadow:
@@ -147,13 +147,13 @@ class BurstDay:
                 event["peak"] = signal
 
     def payload(self):
-        return {"provider": "RQData", "date": self.day, "quantile": self.quantile, "replay": self.replay,
+        return {"provider": "RQData", "date": self.day, "quantile": self.quantile, "metric": "turnover", "replay": self.replay,
                 "through": SLOTS[max(self.latest.values())] if self.latest else None,
                 "updated_at": iso_utc(datetime.now(CHINA)), "events": self.events, "median_hits": self.shadow}
 
 
-def query_history(api, start, end):
-    mapping = {s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE"): s for s in BASKET}
+def query_history(api, start, end, symbols=BASKET):
+    mapping = {s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE"): s for s in symbols}
     minutes, daily = {}, {}
     current = datetime.fromisoformat(start).date()
     finish = datetime.fromisoformat(end).date()
@@ -161,23 +161,23 @@ def query_history(api, start, end):
         last = min(current + timedelta(days=30), finish)
         for frequency, output in (("1m", minutes), ("1d", daily)):
             frame = api.get_price(list(mapping), start_date=str(current), end_date=str(last),
-                                  frequency=frequency, fields=["volume"], adjust_type="none")
+                                  frequency=frequency, fields=["total_turnover"], adjust_type="none")
             if frame is None:
                 continue
-            for (code, stamp), raw in frame["volume"].items():
+            for (code, stamp), raw in frame["total_turnover"].items():
                 ts = local_time(stamp)
                 date, slot = ts.date().isoformat(), ts.strftime("%H:%M")
-                symbol, volume = mapping[code], number(raw)
+                symbol, amount = mapping[code], number(raw)
                 if frequency == "1d":
-                    output.setdefault(date, {})[symbol] = volume
+                    output.setdefault(date, {})[symbol] = amount
                 elif slot in SLOT_INDEX:
-                    output.setdefault(date, {}).setdefault(symbol, [None] * len(SLOTS))[SLOT_INDEX[slot]] = volume
+                    output.setdefault(date, {}).setdefault(symbol, [None] * len(SLOTS))[SLOT_INDEX[slot]] = amount
         current = last + timedelta(days=1)
     return minutes, daily
 
 
-def replay_day(day, dates, minutes, daily, q):
-    detector = BurstDay(day, make_baseline(dates, minutes, daily, day, q), q, replay=True)
+def replay_day(day, dates, minutes, daily, q, symbols=BASKET):
+    detector = BurstDay(day, make_baseline(dates, minutes, daily, day, q, symbols), q, replay=True, symbols=symbols)
     for i, slot in enumerate(SLOTS[:END + 1]):
         for symbol, values in minutes.get(day, {}).items():
             detector.add(symbol, slot, values[i])

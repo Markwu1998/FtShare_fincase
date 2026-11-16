@@ -26,13 +26,14 @@ def feed_time(value):
 
 
 class PushSession:
-    def __init__(self, api, day, funds, path, burst_dir, q):
+    def __init__(self, api, day, funds, path, burst_dir, q, symbols=BASKET):
         self.day, self.path, self.funds = day, path, funds
+        self.symbols = list(symbols)
         self.burst_path = burst_dir / "live.json"
         self.minutes, self.quotes = {}, {}
         self.ticks = defaultdict(lambda: deque(maxlen=320))
-        self.mapping = {s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE"): s for s in BASKET + [INDEX]}
-        self.groups = {f["symbol"]: f["bucket"] for f in funds if f["symbol"] in BASKET}
+        self.mapping = {s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE"): s for s in self.symbols + [INDEX]}
+        self.groups = {f["symbol"]: f["bucket"] for f in funds if f["symbol"] in self.symbols}
         self.index_codes = {s: INDEX_GROUPS.get(group) for s, group in self.groups.items()}
         self.calendar = [str(d) for d in api.get_trading_dates(
             (datetime.fromisoformat(day) - timedelta(days=130)).date().isoformat(), day)]
@@ -45,7 +46,7 @@ class PushSession:
         if day in self.calendar and len(self.calendar) > 1:
             previous = self.calendar[-2]
             self.previous = provider.bars(api, self.mapping, previous, previous, "1d")
-            self.detector = BurstDay(day, make_baseline([], {}, {}, day, q), q)
+            self.detector = BurstDay(day, make_baseline([], {}, {}, day, q, self.symbols), q, symbols=self.symbols)
             self.load_baseline(api)
         self.last_board = None
 
@@ -53,13 +54,13 @@ class PushSession:
         previous = self.calendar[-2]
         first = self.calendar[max(0, len(self.calendar) - 61)]
         try:
-            minutes, daily = query_history(api, first, previous)
+            minutes, daily = query_history(api, first, previous, self.symbols)
             q = self.detector.quantile
-            self.detector.baseline = make_baseline(self.calendar, minutes, daily, self.day, q)
+            self.detector.baseline = make_baseline(self.calendar, minutes, daily, self.day, q, self.symbols)
             self.baseline_ready = any(all(v is not None and v > 0 for v in totals)
                                       for totals, _ in self.detector.baseline.values())
         except Exception as error:
-            print(f"ETF volume baseline unavailable ({type(error).__name__})", flush=True)
+            print(f"ETF turnover baseline unavailable ({type(error).__name__})", flush=True)
         try:
             refs = api.get_price(sorted({code for code in self.index_codes.values() if code}),
                                  start_date=first, end_date=previous,
@@ -91,16 +92,16 @@ class PushSession:
             return
         if not (close is not None and close > 0):
             return
-        if symbol in BASKET and (cash is None or cash < 0 or volume is None or volume < 0):
+        if symbol in self.symbols and (cash is None or cash < 0):
             return
         self.minutes[symbol, slot] = (symbol, int(timestamp.timestamp() * 1000), close, cash)
-        if symbol in BASKET and self.detector is not None:
+        if symbol in self.symbols and self.detector is not None:
             end = SLOT_INDEX[slot]
             if end < self.detector.latest.get(symbol, -1):
                 if recovered and self.detector.values[symbol][end] is None:
-                    self.detector.values[symbol][end] = volume
+                    self.detector.values[symbol][end] = cash
             else:
-                self.detector.add(symbol, slot, volume, received, recovered=recovered)
+                self.detector.add(symbol, slot, cash, received, recovered=recovered)
 
     def warm(self, api):
         now = datetime.now(provider.CHINA)
@@ -224,7 +225,7 @@ class PushSession:
         self.last_publish = monotonic()
 
 
-def watch(api, funds, path, burst_dir, q, continuous):
+def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET):
     session = None
     heartbeat = Path(path).with_name("collector.heartbeat")
     while True:
@@ -244,7 +245,7 @@ def watch(api, funds, path, burst_dir, q, continuous):
         client = None
         try:
             if session is None or session.day != day:
-                session = PushSession(api, day, funds, path, burst_dir, q)
+                session = PushSession(api, day, funds, path, burst_dir, q, symbols)
             if not session.detector:
                 continue
             if preparing:

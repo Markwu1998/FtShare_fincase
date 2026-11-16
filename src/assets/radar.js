@@ -16,7 +16,7 @@ export function createRadar(root) {
         <label id="burstTimeLabel" hidden>回放时点 <input id="burstTime" type="time" step="60" value="14:57"></label>
         <button id="burstSound" type="button" aria-pressed="false">开启提示音</button>
       </div>
-      <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交窗口</th><th>同窗量比 20／60日</th><th>全天量比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
+      <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交额窗口</th><th>同窗额比 20／60日</th><th>全天额比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
       <div id="burstDetail" class="chart" style="height:250px" hidden aria-label="所选事件的成交量与同窗基准"></div>
     </div>
     <div class="radar-funds-heading"><div><h3>单只 ETF · 日度资金信号</h3><p id="radarFundDates">等待共享快照</p></div><div class="radar-fund-counts" id="radarFundCounts"></div></div><div class="radar-funds" id="radarFunds"></div><button class="radar-expand" id="radarExpand" type="button">展开全部20只 ETF</button>`;
@@ -48,7 +48,7 @@ export function createRadar(root) {
       details.set(event.id, signal);
       return `<tr><td>${esc(knownNames.get(event.symbol) || event.symbol)} <small>${esc(event.symbol)}</small></td>
         <td>${esc(event.first)} / ${esc(last)}</td><td>${levels[signal.level]}${event.recovered && !burst.replay ? ' · 补数' : ''}</td>
-        <td><button type="button" data-burst-id="${esc(event.id)}" title="窗口成交量 ${fmt(signal.volume, 0)} 份">${esc(signal.start)}–${esc(signal.end)}</button></td>
+        <td><button type="button" data-burst-id="${esc(event.id)}" title="窗口成交额 ${fmt((signal.amount ?? signal.volume) / 1e8, 2)} 亿元">${esc(signal.start)}–${esc(signal.end)}</button></td>
         <td>${pair(signal.ratios)}</td><td>${pair(signal.daily, 'pct')}</td><td>${esc(evidence.join(' · ') || '—')}</td></tr>`;
     }).join('');
     const now = new Date(Date.now() + 8 * 3600000).toISOString().slice(11,16);
@@ -74,10 +74,10 @@ export function createRadar(root) {
     burstChart.setOption({animation:false,textStyle:{color},legend:{textStyle:{color}},
       grid:{top:42,bottom:24,left:52,right:25,containLabel:true},tooltip:{trigger:'axis',confine:true},
       xAxis:{type:'category',data:slots,axisLabel:{color}},
-      yAxis:{type:'value',name:'万份',axisLabel:{color},nameTextStyle:{color}},
-      series:[{name:'分钟成交量',type:'bar',data:signal.minutes.map(v=>v/10000)},
+      yAxis:{type:'value',name:'亿元',axisLabel:{color},nameTextStyle:{color}},
+      series:[{name:'分钟成交额',type:'bar',data:signal.minutes.map(v=>v/1e8)},
         ...[0,1].map(i=>({name:[20,60][i]+'日同分钟基准',type:'line',
-          data:signal.minute_refs.map(v=>v[i] == null ? null : v[i]/10000)}))]},{notMerge:true});
+          data:signal.minute_refs.map(v=>v[i] == null ? null : v[i]/1e8)}))]},{notMerge:true});
   }
   function chirp() {
     if (!sound || audio?.state !== 'running') return;

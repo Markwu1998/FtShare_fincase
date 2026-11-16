@@ -249,11 +249,19 @@ def main():
         parser.error("--close is a one-shot live operation and cannot be combined with --watch or --replay")
     try:
         from .burst import query_history, replay_day
+        universe = read(ROOT / "config/universe.json")
         if args.mode in {"live", "burst-replay"}:
             burst_dir = ROOT / args.burst_dir
-            q = read(ROOT / args.burst_config)["volume_window_quantile"]
+            burst_config = read(ROOT / args.burst_config)
+            q = burst_config.get("amount_window_quantile", burst_config.get("volume_window_quantile", 0.75))
+            symbols = burst_config.get("symbols") or BASKET
+            if not isinstance(symbols, list) or not symbols or not all(isinstance(s, str) for s in symbols):
+                raise ValueError("etf-burst symbols must be a non-empty list of symbols")
+            unknown = [symbol for symbol in symbols if symbol not in {fund["symbol"] for fund in universe["funds"]}]
+            if unknown:
+                raise ValueError("Unknown etf-burst symbols: " + ", ".join(unknown))
             if not finite(q) or not 0 < q < 1:
-                raise ValueError("volume_window_quantile must be between 0 and 1")
+                raise ValueError("amount_window_quantile must be between 0 and 1")
         if args.mode == "burst-replay" and args.burst_input:
             from .burst import SLOT_INDEX
             source = read(args.burst_input)
@@ -262,7 +270,7 @@ def main():
                 minutes.setdefault(day, {}).setdefault(symbol, [None] * len(SLOTS))[SLOT_INDEX[slot]] = volume
             for symbol, day, _, volume in source["1d"]:
                 daily.setdefault(day, {})[symbol] = volume
-            run_burst_replay(args, burst_dir, q, sorted(daily), minutes, daily, replay_day)
+            run_burst_replay(args, burst_dir, q, sorted(daily), minutes, daily, replay_day, symbols)
             return
         import rqdatac
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -272,8 +280,8 @@ def main():
             warm = before(start, 130)
             end = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
             calendar = [str(day) for day in rqdatac.get_trading_dates(warm, end)]
-            minutes, daily = query_history(rqdatac, warm, end)
-            run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day)
+            minutes, daily = query_history(rqdatac, warm, end, symbols)
+            run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, symbols)
             return
         if args.mode == "crowding":
             from .crowding import DEFAULT_PATH, update
@@ -283,9 +291,7 @@ def main():
                         update_extra(rqdatac, args.crowding_module, path, args.start, args.end))
             print(json.dumps({"days": len(snapshot["rows"]), "through": snapshot["rows"][-1]["date"]}))
             return
-        universe = read(ROOT / "config/universe.json")
         if args.close:
-            # Repair/complete today's intraday cache after the close using 1m bars.
             day = datetime.now(provider.CHINA).date().isoformat()
             rows = provider.collect(rqdatac, {"kind": "replay", "as_of": day + "T15:05:00",
                                               "symbols": BASKET + [INDEX]})
@@ -343,18 +349,18 @@ def main():
             live_run(rqdatac, universe["funds"], args.cache, args.replay)
         else:
             from .realtime import watch
-            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch)
+            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch, symbols)
     except Exception as error:
         parser.exit(1, f"RQData {args.mode} failed ({type(error).__name__}). Check configuration and data coverage.\n")
 
 
-def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day):
+def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, symbols):
     dates = [day for day in calendar if (args.start or args.end) <= day <= args.end]
     if not dates:
-        raise ValueError("No requested replay dates in volume data")
+        raise ValueError("No requested replay dates in turnover data")
     count = elevated = 0
     for day in dates:
-        archive = replay_day(day, calendar, minutes, daily, q)
+        archive = replay_day(day, calendar, minutes, daily, q, symbols)
         if archive["through"] is None:
             raise ValueError(f"Missing replay minutes for {day}")
         publish(burst_dir / "replay" / f"{day}.json", archive)
