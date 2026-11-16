@@ -6,9 +6,9 @@
 
 Python 网页服务提供两个平级入口。ETF 资金观测台（`/`）用于观察盘中交易和 ETF 资金变化，市场拥挤度观测台（`/crowding`）用于跟踪沪深 A 股成交集中度、大小盘风格、指数行业、公募重仓及融资宏观指标。
 
-[Python 启动、采集与回放](docs/python-backend.md) · [RQData 官方文档](https://www.ricequant.com/doc/rqdata/python/index-rqdatac)
+[Python 启动、采集与回放](docs/python-backend.md) · [运行与运维手册](docs/operations.md) · [文档目录](docs/index.md) · [RQData 官方文档](https://www.ricequant.com/doc/rqdata/python/index-rqdatac)
 
-**v0.1.0 · ETF异动雷达 · 20／60日双基准 · 20只核心ETF · 12类宽基 · 9张分析图表**
+**RQData · ETF 异动雷达（20/60 日双基准） · 20 只核心 ETF · 12 类宽基 · 9 张分析图 · 市场拥挤度观测台**
 
 ![ETF资金观测台预览](docs/preview.jpg)
 
@@ -54,7 +54,7 @@ Python 采集与网页服务可独立运行。见 [Python 后端启动和部署]
 
 实盘模式需要具备相应权限的 RQData 账号，以及安装了 `rqdatac` 和 `rqdatac-fund` 的 Python 环境。后台采集器生成历史快照和盘中缓存，网页只读取发布结果。
 
-[Windows／Linux／腾讯云部署](docs/deployment.md) · [旧 Node 启动与回退](docs/rqdata-market.md) · [上游模块迁移对照](docs/market-data-provider-audit.md)
+[Windows／Linux／腾讯云部署](docs/deployment.md) · [运行与运维手册](docs/operations.md) · [旧 Node 启动与回退](docs/rqdata-market.md) · [上游模块迁移对照](docs/market-data-provider-audit.md)
 
 ## 本地体验
 
@@ -64,11 +64,11 @@ Python 采集与网页服务可独立运行。见 [Python 后端启动和部署]
 python -m pip install -r requirements-python.txt
 $env:DATA_MODE = 'demo'
 $env:ENABLE_RADAR = '1'
-$env:PORT = '8082'
+$env:PORT = '8080'
 & .\scripts\python-backend.ps1 web
 ```
 
-打开 [http://127.0.0.1:8082](http://127.0.0.1:8082) 查看 ETF 演示样本。市场拥挤度页面需在真实数据模式下加载独立快照，配置见 [Python 后端](docs/python-backend.md)。
+打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看 ETF 演示样本。市场拥挤度页面需在真实数据模式下加载独立快照，配置见 [Python 后端](docs/python-backend.md)。
 
 [图表接口](docs/chart-interfaces.md) · [数据与计算](docs/data.md) · [参与开发](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 

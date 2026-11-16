@@ -10,8 +10,8 @@
 $env:DATA_MODE = 'live'
 # 采集历史，输出到 .env 配置的历史快照路径
 & .\scripts\python-backend.ps1 history
-# 网页默认在 8082，可由 PORT 或 .env 覆盖
-$env:PORT = '8082'
+# 网页默认在 8080，可由 PORT 或 .env 覆盖
+$env:PORT = '8080'
 & .\scripts\python-backend.ps1 web
 ```
 
@@ -22,12 +22,60 @@ Linux 或已配置 SDK 凭据的 Python 环境可直接运行以下命令。环�
 ```sh
 python -m etf_backend.collect history --config .local/rqdata-market.json
 python -m etf_backend.collect live --watch
-DATA_MODE=live ENABLE_RADAR=1 uvicorn etf_backend.web:app --host 127.0.0.1 --port 8082
+DATA_MODE=live ENABLE_RADAR=1 uvicorn etf_backend.web:app --host 127.0.0.1 --port 8080
 ```
 
 回放用 `live --replay YYYY-MM-DD --cache <独立文件>` 生成缓存。网页同时配置该文件为 `FTSHARE_LIVE_CACHE_FILE`，并设 `RQDATA_ALLOW_REPLAY=1`。盘中模式应使用自己的缓存文件。
 
 Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/python-rqdata-replay.json'` 打开已生成的回放。普通 `web` 模式下，分时图、实时排行和成交雷达要等盘中采集器写入首份缓存。日度资金和历史图表读取历史快照。
+
+## 本地缓存、增量更新与数据目录
+
+历史快照、盘中缓存、拥挤度和放量归档默认写在 `data/private/`，该目录已被 `.gitignore` 忽略。可以把下面四个变量指向任意目录（支持绝对路径），例如统一放到 `D:\ftshare-data\`：
+
+| 变量 | 默认 | 内容 |
+|---|---|---|
+| `FTSHARE_SEED_FILE` | `data/private/rqdata-seed.json` | 历史快照（只读网页读取） |
+| `FTSHARE_LIVE_CACHE_FILE` | `data/private/rqdata-live.json` | 盘中分钟缓存（每日覆盖） |
+| `CROWDING_FILE` | `data/private/rqdata-crowding.json` | 市场拥挤度日度快照（行业/公募/融资为同目录派生文件） |
+| `ETF_BURST_DIR` | `data/private/etf-burst` | 逐 ETF 放量实时与历史归档 |
+
+数据目录不要提交到 git。若必须放在仓库内，请沿用被忽略的 `data/private/`，或把新目录加入 `.gitignore`。
+
+每日收盘后只更新最近窗口，不要重跑全量：
+
+```powershell
+& .\scripts\python-backend.ps1 history -Arguments @('--recent')
+```
+
+`--recent` 只重新查询最近 14 天重叠窗口（含上游修订），再与现有快照按日期合并：旧日期原样保留，窗口内用新值替换。成员、公式、分钟轴不一致，或合并会丢失旧的有效交易日时，命令直接失败且不覆盖文件。首次仍需一次全量 `history`。
+
+拥挤度本身按模块增量更新：日度重查最近 5 个已归档交易日，行业/公募/融资各自维护独立文件。
+
+体量参考（362 只 ETF，2025-01 起）：快照约 1.0 MB，其中分钟样本 0.43 MB、分类合计 0.17 MB、规模/折溢价 0.30 MB；每个交易日新增约 1.1 KB（约 0.26 MB/年）。盘中缓存约 18 KB（每轮覆盖），逐 ETF 放量归档约 7 KB/交易日。
+
+### 收盘补全
+
+`live --close` 是收盘后的一次性补全：用当日 1m 线重建完整盘中快照（不带 replay 标记），用于修复采集器晚启动或断线造成的 14:51–15:00 缺口。
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode live -Arguments @('--close')
+```
+
+期望输出包含 `"through": "15:00"`。它只改盘中缓存，不动日频历史。
+
+### 定时任务
+
+当前由 DSH 定时任务驱动，详见 [运维手册](operations.md)：
+
+| 任务 | 触发（Asia/Shanghai） | 动作 |
+|---|---|---|
+| `ETF 日频更新 08:20` | 周一至周五 08:20 | `history --recent` |
+| `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时后台启动网页/采集器 |
+| `ETF 日频补采 12:30` | 周一至周五 12:30 | `history --recent`，补晚披露 |
+| `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，补全到 15:00 |
+
+采集器为常驻进程：09:15 自动切换新交易日，15:02 后空闲；每天写 `data/private/collector.heartbeat`，`start-collector.cmd` 依据心跳避免重复启动。日常状态用 `status.cmd` 查看。
 
 生成指定日期的回放示例。
 
@@ -45,7 +93,7 @@ Linux 对应命令为 `python -m etf_backend.collect burst-replay --end=2026-11-
 
 ## API 与部署
 
-现有网页使用 `/api/health`、`/api/board`、`/api/history`、`/api/live` 和 `/api/cumulative`。浏览器继续执行分钟回放和交互绘图。API 和采集器都能在无 Node.js 环境运行。
+现有网页使用 `/api/health`、`/api/board`、`/api/history`、`/api/live` 和 `/api/cumulative`，另含 `/api/crowding*`、`/api/etf-burst*`。浏览器继续执行分钟回放和交互绘图。API 和采集器都能在无 Node.js 环境运行。部署与日常运维见 [运维手册](operations.md)。
 
 部署目标可以是另一台 Windows 电脑、Windows/Linux 服务器，或腾讯云 CVM。腾讯云 CVM 可选 Windows Server 或 Linux，采集调度方式随操作系统选择。单机部署可把采集器和 Uvicorn 作为不同进程运行，并通过同一数据目录共享快照。容器多实例部署需要共享存储，并应把采集任务部署到独立的常驻或定时运行环境。 [腾讯云 CVM 镜像列表](https://cloud.tencent.com/document/product/213/93093)
 
