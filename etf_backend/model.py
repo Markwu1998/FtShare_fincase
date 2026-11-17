@@ -9,7 +9,8 @@ from pathlib import Path
 from .provider import CHINA
 
 CONSTANTS = json.loads(Path(__file__).with_name("constants.json").read_text(encoding="utf-8"))
-BASKET = CONSTANTS["basket"]
+# Single source of truth for the core ETF basket, shared with scripts/basket.py.
+BASKET = json.loads((Path(__file__).resolve().parents[1] / "config/basket.json").read_text(encoding="utf-8"))["symbols"]
 CATEGORIES = CONSTANTS["categories"]
 COLORS = CONSTANTS["colors"]
 FORMULA = CONSTANTS["formula"]

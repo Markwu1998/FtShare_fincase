@@ -210,6 +210,34 @@ ETF_BURST_DIR=D:\ftshare-data\etf-burst
 
 放在仓库外即不被 git 管理；放在仓库内请沿用 `data/private/`。
 
+### 4.4 核心篮子维护
+
+核心篮子只有一个来源：`config/basket.json`。不要直接改 `etf_backend/constants.json` 或 `src/server/model.js`。
+
+```powershell
+python scripts\basket.py list
+python scripts\basket.py set 510050.SH 510100.SH ...   # 直接替换为 20 只
+python scripts\basket.py add 510330.SH                 # 增一只；需同时删一只以保持 20
+python scripts\basket.py remove 159633.SZ
+```
+
+脚本会校验“恰好 20 只、不重复、都在 `config/universe.json` 中”，并同步：
+
+- `src/server/model.js` 的 `BASKET`
+- `config/universe.json` 的 `is_core_basket`
+- `config/etf-burst.json` 若定义了 `symbols` 也一并更新（当前未定义，默认跟随篮子）
+
+**篮子变更会改变日度净申赎历史，必须全量重建，不能用 `--recent`：**
+
+```powershell
+Move-Item data\private\rqdata-seed.json .local\rqdata-seed-old.json
+& .\scripts\python-backend.ps1 history
+npm run demo:generate
+& .\scripts\python-backend.ps1 -Mode live -Arguments @('--close')
+```
+
+然后**重启网页与采集器**（`BASKET` 在进程启动时加载），最后 `.\status.cmd` 验证。
+
 ---
 
 ## 5. 健康检查

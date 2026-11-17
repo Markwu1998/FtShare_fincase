@@ -2,6 +2,8 @@
 
 历史快照通过后台获取不复权日线、1 分钟行情、交易日历、ETF 日度份额、单位净值和折算记录。采集与增量更新见 [Python 后端](python-backend.md)，接口字段见 [图表接口](chart-interfaces.md)，运行与定时任务见 [运维手册](operations.md)。
 
+核心篮子的唯一来源是 `config/basket.json`；`scripts/basket.py` 负责校验（恰好 20 只、不重复、成员在 `config/universe.json` 中）并同步到 Python/Node 常量与 `is_core_basket` 标记。
+
 同一归属日净申赎使用当日份额减去经折算校正的上一交易日份额，再乘原始单位净值。上市前不纳入。上市首日前值、净值或折算证据不足时保留缺口，区间累计从起始日计算并在首个缺口停止。
 
 ## 历史校正记录
