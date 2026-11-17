@@ -1,4 +1,19 @@
 export const RADAR_DEFAULTS = { cumulative: 1.5, burst: 2, minBurstAmount: 5, fundFlow: 10 };
+const LEVELS = ['', '预警', '确认', '极端放量'];
+export function burstAnnouncement(event, names = new Map()) {
+  const signal = event?.peak || {};
+  const name = names.get?.(event?.symbol) || names[event?.symbol] || event?.symbol || '未知标的';
+  const raw = signal.amount ?? signal.volume;
+  const amount = Number.isFinite(raw) && raw > 0 ? (raw / 1e8).toFixed(2) + '亿元' : '成交额待齐';
+  const rawTime = String(signal.end || event?.last || '');
+  const time = rawTime ? rawTime.replace(':', '点') + '分' : '时间待齐';
+  const level = LEVELS[signal.level ?? event?.level] || '放量';
+  const label = level === '确认' ? '确认放量' : level;
+  const ratio = Array.isArray(signal.ratios) ? signal.ratios[0] : null;
+  const ratioText = Number.isFinite(ratio) ? '，为20日同窗P75的' + ratio.toFixed(1) + '倍' : '';
+  const window = signal.window ? signal.window + '分钟' : '';
+  return name + '，' + time + '，' + window + amount + '，' + label + ratioText;
+}
 const valid = v => typeof v === 'number' && Number.isFinite(v);
 const sum = rows => rows.every(valid) ? rows.reduce((a, b) => a + b, 0) : null;
 const mean = rows => rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : null;

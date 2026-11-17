@@ -1,4 +1,4 @@
-import { evaluateRadar, RADAR_DEFAULTS } from './radar-math.js';
+import { evaluateRadar, RADAR_DEFAULTS, burstAnnouncement } from './radar-math.js';
 const fmt = (v, n = 1) => Number.isFinite(v) ? Number(v).toLocaleString('zh-CN', { minimumFractionDigits: n, maximumFractionDigits: n }) : '—';
 const signed = v => Number.isFinite(v) ? (v > 0 ? '+' : '') + fmt(v, 2) : '—';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -14,7 +14,7 @@ export function createRadar(root) {
       <div class="radar-controls">
         <label>行情模式 <select id="burstDate"><option value="">实时</option></select></label>
         <label id="burstTimeLabel" hidden>回放时点 <input id="burstTime" type="time" step="60" value="14:57"></label>
-        <button id="burstSound" type="button" aria-pressed="false">开启提示音</button>
+        <button id="burstSound" type="button" aria-pressed="false">开启语音播报</button>
       </div>
       <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交额窗口</th><th>同窗额比 20／60日</th><th>全天额比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
       <div id="burstDetail" class="chart" style="height:250px" hidden aria-label="所选事件的成交量与同窗基准"></div>
@@ -86,6 +86,21 @@ export function createRadar(root) {
     oscillator.connect(gain); gain.connect(audio.destination);
     oscillator.start(); oscillator.stop(audio.currentTime + .16);
   }
+  function announce(event) {
+    if (!sound) return;
+    const text = burstAnnouncement(event, names());
+    if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.05;
+        utterance.pitch = 1;
+        window.speechSynthesis.speak(utterance);
+        return;
+      } catch { /* fall through to the beep */ }
+    }
+    chirp();
+  }
   async function selectBurst() {
     const revision = ++choice, date = $('burstDate').value;
     eventStream?.close(); eventStream = null;
@@ -112,8 +127,9 @@ export function createRadar(root) {
       if (revision !== choice) return;
       const value = JSON.parse(message.data);
       const known = new Map((burst?.events || []).map(event => [event.id, event.level]));
-      if (settled && value.events.some(event => !event.recovered && event.detected_at &&
-          Date.now() - Date.parse(event.detected_at) < 15000 && event.level >= 2 && event.level > (known.get(event.id) || 0))) chirp();
+      const fresh = value.events.filter(event => !event.recovered && event.detected_at &&
+          Date.now() - Date.parse(event.detected_at) < 15000 && event.level >= 2 && event.level > (known.get(event.id) || 0));
+      if (settled && fresh.length) fresh.slice(0, 3).forEach(announce);
       burst = value;
       settled = true;
       renderBurst();
@@ -143,15 +159,20 @@ export function createRadar(root) {
   window.addEventListener('resize', () => { if (!$('burstDetail').hidden) burstChart?.resize(); });
   window.addEventListener('ftshare:theme-change', renderBurstDetail);
   $('burstSound').addEventListener('click', async () => {
-    try {
-      if (!sound) {
-        audio ||= new AudioContext();
+    if (!sound) {
+      try {
+        audio ||= new (window.AudioContext || window.webkitAudioContext)();
         await audio.resume();
-      }
-      sound = !sound;
-      $('burstSound').setAttribute('aria-pressed', String(sound));
-      $('burstSound').textContent = sound ? '关闭提示音' : '开启提示音';
-    } catch { $('burstSound').textContent = '提示音不可用'; }
+      } catch { /* speech can still work without WebAudio */ }
+    }
+    sound = !sound;
+    $('burstSound').setAttribute('aria-pressed', String(sound));
+    $('burstSound').textContent = sound ? '关闭语音播报' : '开启语音播报';
+    if (sound && 'speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance('语音播报已开启');
+      utterance.lang = 'zh-CN';
+      window.speechSynthesis.speak(utterance);
+    }
   });
   if (document.documentElement.dataset.dataMode !== 'demo') openBurst();
   function render(nextSeed = seed, nextLive = live) {

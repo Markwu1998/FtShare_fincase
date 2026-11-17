@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateRadar } from '../src/assets/radar-math.js';
+import { evaluateRadar, burstAnnouncement } from '../src/assets/radar-math.js';
 function fixture() {
   const slots = Array.from({length:31},(_,i)=>'09:'+String(30+i).padStart(2,'0'));
   const minutes = Object.fromEntries(Array.from({length:60},(_,i)=>[new Date(Date.UTC(2026,8,1+i)).toISOString().slice(0,10),{bars:slots.map(()=>1)}]));
@@ -66,4 +66,9 @@ test('missing 60-day samples cannot silently fall back to a shorter confirmation
 test('short-term confirmation requires sustained triggers against both windows',()=>{
   const{seed,live}=fixture();Object.entries(seed.minutes).sort(([a],[b])=>a.localeCompare(b)).slice(0,40).forEach(([,r])=>r.bars.fill(4));live.bars.fill(1);live.bars[20]=10;
   const s=evaluateRadar(seed,live,{at:21,cumulative:5});assert.equal(s.recent.burstConfirmed,true);assert.equal(s.long.burstConfirmed,false);assert.equal(s.burstDualConfirmed,false);assert.equal(s.state,'watch');
+});
+
+test('burst announcement carries name, time, amount and level',()=>{
+  const text=burstAnnouncement({symbol:'510330.SH',level:3,last:'14:57',peak:{end:'14:57',window:5,amount:2077969313,ratios:[10.26],level:3}},new Map([['510330.SH','华夏300']]));
+  assert.match(text,/华夏300/);assert.match(text,/14点57分/);assert.match(text,/5分钟20.78亿元/);assert.match(text,/极端放量/);assert.match(text,/10.3倍/);
 });
