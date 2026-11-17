@@ -288,6 +288,10 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
         live = entry.get("value") or seed.get("live_snapshot")
         if live and live.get("provider") == source and live.get("slots") == seed["minute_slots"] and (
                 allow_replay or not live.get("replay")):
+            replay = bool(live.get("replay")) and allow_replay
+            if not replay and live.get("date") != datetime.now(CHINA).date().isoformat():
+                # A new trading day starts empty: never show yesterday's intraday as today's.
+                return error("等待当日盘中行情", "cache_not_ready", 503)
             try:
                 fetched_at = datetime.fromisoformat(live["fetched_at"].replace("Z", "+00:00"))
                 cn = datetime.now(CHINA)

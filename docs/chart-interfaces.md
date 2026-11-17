@@ -2,7 +2,7 @@
 
 | 图表 | RQData 方法与字段 |
 |---|---|
-| 分时成交额、指数走势、累计成交、20/60 日雷达 | `rqdatac.get_price(frequency="1m", adjust_type="none")`，使用 `total_turnover` 与 `close`，统一 240 点时间轴 |
+| 分时成交额、指数走势、累计成交、20/60 日雷达 | 盘中：`LiveMarketDataClient` 的 `bar_`/`tick_` 推送；启动或断线时用 `rqdatac.get_price(frequency="1m", adjust_type="none")` 补齐；历史样本用 `get_price("1m")`，统一 240 点时间轴 |
 | ETF 表格、盘中总览 | `rqdatac.current_snapshot` 的 `last` 和 `total_turnover`，涨跌幅按上一交易日日线收盘计算 |
 | ETF 历史成交额、指数日线和各标的前收 | `rqdatac.get_price(frequency="1d", adjust_type="none")`，取 `total_turnover`、`close` |
 | 核心与宽基净申赎、分类表、放量与常态日划分 | `rqdatac_fund.fund.get_daily_units`、`fund.get_nav`、`fund.get_split`，取份额、单位净值与折算事件 |

@@ -299,7 +299,9 @@ async function refresh(){
  finally{loading=false;}
 }
 function tick(){
- if(loading)return;remaining--;const hm=cst().slice(11,16),day=new Date(Date.now()+8*3600000).getUTCDay(),trading=day>0&&day<6&&((hm>='09:15'&&hm<='11:35')||(hm>='12:55'&&hm<='15:10'));
+ if(loading)return;
+ if(live&&live.date&&!live.replay&&live.date!==cst().slice(0,10)){live=null;location.reload();return;}
+ remaining--;const hm=cst().slice(11,16),day=new Date(Date.now()+8*3600000).getUTCDay(),trading=day>0&&day<6&&((hm>='09:15'&&hm<='11:35')||(hm>='12:55'&&hm<='15:10'));
  if(seed.demo)tag('tagCountdown','离线演示 · 固定样本 · '+Math.max(0,remaining)+'秒后检查');
  else tag('tagCountdown',(trading?'盘中':'非交易时段')+' · '+Math.max(0,remaining)+'秒后读取缓存');
  if(remaining<=0){remaining=trading?60:300;refresh();}

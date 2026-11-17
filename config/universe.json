@@ -2380,7 +2380,8 @@
       "inception_date": "2025-01-08",
       "listed_date": "2025-01-23",
       "tracking_index_name": "上证180指数",
-      "tracking_index_symbol": "000010.SH"
+      "tracking_index_symbol": "000010.SH",
+      "delisted_date": "2026-11-16"
     },
     {
       "symbol": "530100.SH",

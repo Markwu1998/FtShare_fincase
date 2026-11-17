@@ -55,7 +55,8 @@ def history_snapshot(market, records, universe, config, end, closes=None):
     for day in calendar[1:]:
         if day < min(flow_start, market_start):
             continue
-        present = {symbol: by_fund[symbol][day] for symbol, fund in members.items() if eligible(fund) <= day}
+        present = {symbol: by_fund[symbol][day] for symbol, fund in members.items()
+                   if eligible(fund) <= day and (not fund.get("delisted_date") or day < fund["delisted_date"])}
         core_rows = [present[s] for s in BASKET if s in present]
         values = [r["flow"] for r in core_rows if finite(r["flow"])]
         core[day] = (sum(values) if values and len(values) == len(core_rows) else None, len(values), len(core_rows))
@@ -69,7 +70,14 @@ def history_snapshot(market, records, universe, config, end, closes=None):
         for symbol, row in present.items():
             fund = members[symbol]
             bucket = fund["bucket"]
-            categories[bucket].append(symbol)
+            first_day = day == eligible(fund)
+            reasons = row.get("issues") or []
+            # A fund's first session has no attributable share change yet. Keep it
+            # in size/premium metrics but do not let it blank the category flow.
+            baseline_missing = "listing_baseline_missing" in reasons or (
+                first_day and "previous_share_missing" in reasons)
+            if not baseline_missing:
+                categories[bucket].append(symbol)
             units, nav, close = row["shares"], row["nav"], daily_closes.get(symbol)
             values = {
                 "size": units * nav / 1e8 if finite(units) and finite(nav) and nav > 0 else None,
@@ -78,11 +86,13 @@ def history_snapshot(market, records, universe, config, end, closes=None):
             for name, value in values.items():
                 if value is not None:
                     details[name].append({"symbol": symbol, "category": bucket, "value": value})
+            if baseline_missing:
+                continue
             if finite(row["flow"]):
                 valid[bucket].append(row["flow"])
             else:
                 broad["issues"].setdefault(day, []).append({"symbol": symbol, "name": fund["name"], "bucket": bucket,
-                                                            "reasons": row["issues"]})
+                                                            "reasons": reasons})
         totals = []
         for bucket in CATEGORIES:
             expected, count = len(categories[bucket]), len(valid[bucket])
@@ -339,6 +349,7 @@ def main():
                 raise ValueError("RQData broad metrics contain no valid data")
             if recent:
                 snapshot = merge_history(previous, snapshot)
+            snapshot = preserve_previous(previous, snapshot)
             if previous is not None:
                 validate_replacement(previous, snapshot)
             publish(args.seed, snapshot)
@@ -351,6 +362,14 @@ def main():
             from .realtime import watch
             watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch, symbols)
     except Exception as error:
+        if os.environ.get("ETF_DEBUG") == "1":
+            import traceback
+            traceback.print_exc()
+            try:
+                with open(ROOT / ".local/last-error.txt", "w", encoding="utf-8") as handle:
+                    traceback.print_exc(file=handle)
+            except OSError:
+                pass
         parser.exit(1, f"RQData {args.mode} failed ({type(error).__name__}). Check configuration and data coverage.\n")
 
 
@@ -424,6 +443,51 @@ def merge_history(previous, current):
                               "missing_days": sum(day <= merged["latest_flow_date"] and value is None
                                                   for day, value in zip(broad["dates"], broad["total"]))}
     return merged
+
+
+def preserve_previous(previous, current):
+    """Fill null history/broad/metric cells from the previous snapshot.
+
+    A full rebuild can lose old cells when the provider no longer returns an
+    otherwise valid historical sample. Keep the last known value instead of
+    dropping it; new non-null values always win.
+    """
+    if not previous:
+        return current
+    prev_history = {day: i for i, day in enumerate(previous["history"]["dates"])}
+    for key in ("amount", "idx", "netflow"):
+        for i, day in enumerate(current["history"]["dates"]):
+            if finite(current["history"][key][i]):
+                continue
+            j = prev_history.get(day)
+            if j is not None and finite(previous["history"][key][j]):
+                current["history"][key][i] = previous["history"][key][j]
+    prev_broad = {day: i for i, day in enumerate(previous["broad"]["dates"])}
+    for i, day in enumerate(current["broad"]["dates"]):
+        j = prev_broad.get(day)
+        if j is None:
+            continue
+        if not finite(current["broad"]["total"][i]) and finite(previous["broad"]["total"][j]):
+            current["broad"]["total"][i] = previous["broad"]["total"][j]
+        for category in CATEGORIES:
+            if not finite(current["broad"]["series"][category][i]) and finite(previous["broad"]["series"][category][j]):
+                current["broad"]["series"][category][i] = previous["broad"]["series"][category][j]
+    for name, prior in previous.get("broad_metrics", {}).items():
+        metric = current["broad_metrics"].get(name)
+        if not metric:
+            continue
+        for i, day in enumerate(current["broad"]["dates"]):
+            j = prev_broad.get(day)
+            if j is None:
+                continue
+            if not finite(metric["total"][i]) and finite(prior["total"][j]):
+                metric["total"][i] = prior["total"][j]
+            for category in CATEGORIES:
+                if not finite(metric["series"][category][i]) and finite(prior["series"][category][j]):
+                    metric["series"][category][i] = prior["series"][category][j]
+                if not metric["valid"][category][i] and prior["valid"][category][j]:
+                    metric["valid"][category][i] = prior["valid"][category][j]
+    return current
 
 
 def validate_replacement(previous, current):
