@@ -15,7 +15,7 @@ $env:PORT = '8080'
 & .\scripts\python-backend.ps1 web
 ```
 
-在另一个终端启动 `& .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')`。Python 盘中采集使用 RQData `LiveMarketDataClient` 订阅分钟线和 tick，一个进程向现有看板和逐只 ETF 事件雷达发布结果。浏览器继续通过 `/api/live` 读取共享缓存。开市前启动可预载基准，开市中启动或断线时可用 RQData 分钟线补齐已结束分钟。
+在另一个终端启动 `& .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')`。Python 盘中采集使用 RQData `LiveMarketDataClient` 订阅分钟线和 tick，一个进程向现有看板和逐只 ETF 事件雷达发布结果。浏览器继续通过 `/api/live` 读取共享缓存。开市前启动可预载基准；**11:30–13:00 保持同一订阅不断流**，因此 13:01 的第一根下午分钟线不需要额外回补。开市中启动、进程重启或上游断流时，用 RQData 分钟线补齐已结束分钟。
 
 Linux 或已配置 SDK 凭据的 Python 环境可直接运行以下命令。环境变量只在相应组件的服务配置中设置，网页应使用只读的快照路径。
 

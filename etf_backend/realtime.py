@@ -265,25 +265,40 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET):
             last_input = connected
             last_warm = connected
             pending = False
-            while trading_minute(datetime.now(provider.CHINA)):
+            while True:
+                current = datetime.now(provider.CHINA)
+                hm = current.strftime("%H:%M")
+                # Keep one subscription alive through the lunch break. Closing
+                # at 11:30 and reconnecting at 13:00 can miss 13:01/13:02.
+                if not (current.weekday() < 5 and "09:30" <= hm <= "15:02"):
+                    break
+                lunch = "11:30" < hm < "13:00"
+                if lunch:
+                    # No market messages during lunch; do not trip the 45s
+                    # stream watchdog, and keep the heartbeat fresh.
+                    last_input = monotonic()
                 try:
                     msg, received = messages.get(timeout=1)
                     if session.handle(msg, received):
                         pending = True
                         last_input = monotonic()
                 except Empty:
-                    if not worker.is_alive() or monotonic() - last_input >= 45:
+                    if not worker.is_alive() or (not lunch and monotonic() - last_input >= 45):
                         raise RuntimeError("RQData stream stopped")
                 if pending and monotonic() - session.last_publish >= 1:
                     session.flush()
                     pending = False
                 # Re-read today's 1m bars periodically: fills any minutes the
-                # push stream missed (for example around the lunch reconnect).
+                # push stream missed (for example after a process restart).
                 if monotonic() - last_warm >= 300:
                     session.warm(api)
                     last_warm = monotonic()
-                if monotonic() - last_input >= 45:
+                if not lunch and monotonic() - last_input >= 45:
                     raise RuntimeError("RQData stream has no usable messages")
+                try:
+                    heartbeat.write_text(iso_utc(datetime.now(provider.CHINA)), encoding="utf-8")
+                except OSError:
+                    pass
                 if not continuous and monotonic() - connected >= 75:
                     if pending:
                         session.flush()
