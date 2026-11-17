@@ -68,13 +68,13 @@ test('short-term confirmation requires sustained triggers against both windows',
   const s=evaluateRadar(seed,live,{at:21,cumulative:5});assert.equal(s.recent.burstConfirmed,true);assert.equal(s.long.burstConfirmed,false);assert.equal(s.burstDualConfirmed,false);assert.equal(s.state,'watch');
 });
 
-test('burst announcement carries code, time, amount and level',()=>{
+test('burst announcement speaks the code character by character',()=>{
   const text=burstAnnouncement({symbol:'510330.SH',level:3,last:'14:57',peak:{end:'14:57',window:5,amount:2077969313,ratios:[10.26],level:3}});
-  assert.match(text,/510330/);assert.doesNotMatch(text,/华夏300/);assert.match(text,/14点57分/);assert.match(text,/5分钟20.78亿元/);assert.match(text,/极端放量/);assert.match(text,/10.3倍/);
+  assert.match(text,/五一零三三零/);assert.doesNotMatch(text,/510330/);assert.doesNotMatch(text,/华夏300/);assert.match(text,/14点57分/);assert.match(text,/5分钟20.78亿元/);assert.match(text,/极端放量/);assert.match(text,/10.3倍/);
 });
-test('level-1 warning is announced immediately with the code',()=>{
+test('level-1 warning is announced immediately with the spoken code',()=>{
   const text=burstAnnouncement({symbol:'510330.SH',level:1,last:'09:45',peak:{end:'09:45',window:2,amount:500000000,ratios:[2.3],level:1}});
-  assert.match(text,/510330/);assert.match(text,/预警/);assert.match(text,/2分钟5.00亿元/);
+  assert.match(text,/五一零三三零/);assert.match(text,/预警/);assert.match(text,/2分钟5.00亿元/);
 });
 
 test('a later gap does not blank the radar before the gap',()=>{

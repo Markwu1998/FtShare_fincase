@@ -19,10 +19,11 @@ export function createRadar(root) {
       <div class="radar-voice" id="burstVoicePanel">
         <span class="radar-voice-title">语音设置</span>
         <label>音色<select id="burstVoice"><option value="">系统默认</option></select></label>
-        <label>语速<input id="burstRate" type="range" min="0.7" max="1.5" step="0.05" value="1.05"><output id="burstRateValue">1.05×</output></label>
+        <label>语速<input id="burstRate" type="range" min="0.1" max="10" step="0.05" value="1.05"><output id="burstRateValue">1.05×</output></label>
         <label>音调<input id="burstPitch" type="range" min="0.8" max="1.3" step="0.05" value="1"><output id="burstPitchValue">1.00</output></label>
         <label>音量<input id="burstVolume" type="range" min="0" max="1" step="0.05" value="1"><output id="burstVolumeValue">100%</output></label>
         <button id="burstTest" type="button">试听</button>
+        <span class="radar-voice-status" id="burstVoiceStatus">检测语音引擎…</span>
       </div>
       <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交额窗口</th><th>同窗额比 20／60日</th><th>全天额比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
       <div id="burstDetail" class="chart" style="height:250px" hidden aria-label="所选事件的成交量与同窗基准"></div>
@@ -97,33 +98,61 @@ export function createRadar(root) {
           data:signal.minute_refs.map(v=>v[i] == null ? null : v[i]/1e8)}))]},{notMerge:true});
   }
   function chirp() {
-    if (!sound || audio?.state !== 'running') return;
+    if (!sound || !audio || audio.state !== 'running') return;
     const oscillator = audio.createOscillator(), gain = audio.createGain();
     oscillator.frequency.value = 760; gain.gain.value = .08;
     oscillator.connect(gain); gain.connect(audio.destination);
     oscillator.start(); oscillator.stop(audio.currentTime + .16);
   }
+  async function ensureAudio() {
+    try {
+      audio ||= new (window.AudioContext || window.webkitAudioContext)();
+      await audio.resume();
+    } catch { /* speech synthesis may still work */ }
+  }
   function announce(event) {
     if (!sound) return;
-    if (speak(burstAnnouncement(event))) return;
     chirp();
+    speak(burstAnnouncement(event));
   }
   function voices() {
     return 'speechSynthesis' in window ? window.speechSynthesis.getVoices() : [];
   }
   function speak(text) {
-    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return false;
+    const status = $('burstVoiceStatus');
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+      if (status) status.textContent = '浏览器不支持语音合成';
+      return false;
+    }
+    const list = voices();
+    if (!list.length) {
+      if (status) status.textContent = '未检测到系统语音，已使用提示音';
+      return false;
+    }
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-CN';
-      utterance.rate = number('burstRate', 1.05, .5, 2);
+      utterance.rate = number('burstRate', 1.05, .1, 10);
       utterance.pitch = number('burstPitch', 1, 0, 2);
       utterance.volume = number('burstVolume', 1, 0, 1);
       const uri = $('burstVoice')?.value;
-      utterance.voice = voices().find(voice => voice.voiceURI === uri) || null;
+      utterance.voice = list.find(voice => voice.voiceURI === uri)
+        || list.find(voice => /^(zh|cmn)/i.test(voice.lang)) || null;
+      utterance.onstart = () => {
+        if (status) status.textContent = '正在播报' + (utterance.voice ? ' · ' + utterance.voice.name : '');
+      };
+      utterance.onerror = event => {
+        if (status) status.textContent = '语音失败：' + (event.error || '未知错误');
+      };
+      utterance.onend = () => { if (status) status.textContent = '语音引擎就绪'; };
+      window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
+      if (status) status.textContent = '已发送语音 · ' + (utterance.voice?.name || '系统默认');
       return true;
-    } catch { return false; }
+    } catch (error) {
+      if (status) status.textContent = '语音异常：' + (error?.message || '未知错误');
+      return false;
+    }
   }
   function paintSound() {
     $('burstSound').setAttribute('aria-pressed', String(sound));
@@ -138,9 +167,13 @@ export function createRadar(root) {
     select.replaceChildren(new Option('系统默认', ''));
     for (const voice of list) select.add(new Option(voice.name + ' · ' + voice.lang, voice.voiceURI));
     select.value = list.some(voice => voice.voiceURI === saved) ? saved : '';
+    const status = $('burstVoiceStatus');
+    if (status) status.textContent = !('speechSynthesis' in window)
+      ? '浏览器不支持语音合成'
+      : all.length ? '语音引擎：' + all.length + ' 个可用' : '未检测到系统语音';
   }
   function paintVoice() {
-    $('burstRateValue').textContent = number('burstRate', 1.05, .5, 2).toFixed(2) + '×';
+    $('burstRateValue').textContent = number('burstRate', 1.05, .1, 10).toFixed(2) + '×';
     $('burstPitchValue').textContent = number('burstPitch', 1, 0, 2).toFixed(2);
     $('burstVolumeValue').textContent = Math.round(number('burstVolume', 1, 0, 1) * 100) + '%';
     localStorage.setItem('ftshare-voice', $('burstVoice').options.length > 1 ? $('burstVoice').value : (localStorage.getItem('ftshare-voice') || ''));
@@ -205,24 +238,24 @@ export function createRadar(root) {
   });
   window.addEventListener('resize', () => { if (!$('burstDetail').hidden) burstChart?.resize(); });
   window.addEventListener('ftshare:theme-change', renderBurstDetail);
-  $('burstSound').addEventListener('click', async () => {
-    if (!sound) {
-      try {
-        audio ||= new (window.AudioContext || window.webkitAudioContext)();
-        await audio.resume();
-      } catch { /* speech can still work without WebAudio */ }
-    }
+  $('burstSound').addEventListener('click', () => {
     sound = !sound;
     paintSound();
-    if (sound) speak('语音播报已开启');
+    if (sound) {
+      // Speak synchronously inside the click: Chrome can drop the user
+      // activation if speech is deferred behind an awaited AudioContext.
+      speak('语音播报已开启');
+      ensureAudio().then(chirp);
+    }
   });
   for (const id of ['burstRate', 'burstPitch', 'burstVolume']) $(id).addEventListener('input', paintVoice);
   $('burstVoice').addEventListener('change', paintVoice);
   $('burstTest').addEventListener('click', () => {
     if (!sound) { sound = true; paintSound(); }
-    if (!speak('510330，14点57分，5分钟20.78亿元，预警，为20日同窗P75的10.3倍')) {
-      $('burstTest').textContent = '语音不可用';
-    }
+    const sample = '五一零三三零，14点57分，5分钟20.78亿元，预警，为20日同窗P75的10.3倍';
+    const ok = speak(sample);
+    ensureAudio().then(chirp);
+    if (!ok) $('burstTest').textContent = '语音不可用';
   });
   if (document.documentElement.dataset.dataMode !== 'demo') openBurst();
   function render(nextSeed = seed, nextLive = live) {

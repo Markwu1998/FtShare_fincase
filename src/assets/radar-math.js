@@ -3,6 +3,9 @@ const LEVELS = ['', '预警', '确认', '极端放量'];
 export function burstAnnouncement(event) {
   const signal = event?.peak || {};
   const code = String(event?.symbol || '').replace(/\.(SH|SZ)$/i, '') || '未知标的';
+  // Speak the code character by character. A raw "510330" is read by many
+  // TTS engines as the number 510,330; Chinese digits force a string reading.
+  const spoken = code.replace(/[0-9]/g, digit => '零一二三四五六七八九'[digit]);
   const raw = signal.amount ?? signal.volume;
   const amount = Number.isFinite(raw) && raw > 0 ? (raw / 1e8).toFixed(2) + '亿元' : '成交额待齐';
   const rawTime = String(signal.end || event?.last || '');
@@ -12,7 +15,7 @@ export function burstAnnouncement(event) {
   const ratio = Array.isArray(signal.ratios) ? signal.ratios[0] : null;
   const ratioText = Number.isFinite(ratio) ? '，为20日同窗P75的' + ratio.toFixed(1) + '倍' : '';
   const window = signal.window ? signal.window + '分钟' : '';
-  return code + '，' + time + '，' + window + amount + '，' + label + ratioText;
+  return spoken + '，' + time + '，' + window + amount + '，' + label + ratioText;
 }
 const valid = v => typeof v === 'number' && Number.isFinite(v);
 const sum = rows => rows.every(valid) ? rows.reduce((a, b) => a + b, 0) : null;
