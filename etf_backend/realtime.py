@@ -263,6 +263,7 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET):
             worker = client.listen(handler=enqueue)
             connected = monotonic()
             last_input = connected
+            last_warm = connected
             pending = False
             while trading_minute(datetime.now(provider.CHINA)):
                 try:
@@ -276,6 +277,11 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET):
                 if pending and monotonic() - session.last_publish >= 1:
                     session.flush()
                     pending = False
+                # Re-read today's 1m bars periodically: fills any minutes the
+                # push stream missed (for example around the lunch reconnect).
+                if monotonic() - last_warm >= 300:
+                    session.warm(api)
+                    last_warm = monotonic()
                 if monotonic() - last_input >= 45:
                     raise RuntimeError("RQData stream has no usable messages")
                 if not continuous and monotonic() - connected >= 75:

@@ -191,7 +191,7 @@ def live_snapshot(result, funds, date, replay, close=False):
                       "pct": (close / prior - 1) * 100 if finite(prior) and prior > 0 else None})
     minute = SLOTS[complete[-1]]
     end = datetime.fromisoformat(date + "T" + minute).replace(tzinfo=provider.CHINA).timestamp()
-    observed = end if (replay or close) else min(end, *(quotes[s][0] / 1000 for s in BASKET))
+    observed = end
     value = {"provider": "RQData", "formula": FORMULA, "warnings": [], "date": date, "slots": SLOTS,
              "fetched_at": iso_utc(datetime.fromtimestamp(observed, timezone.utc)), "bars": bars,
              "coverage": coverage, "closes": [index.get(s) for s in SLOTS], "pre_close": previous[INDEX],

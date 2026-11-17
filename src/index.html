@@ -7,10 +7,10 @@
 
 <meta name="theme-color" content="#f2f6f6">
 <script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
-<link rel="stylesheet" href="style.css?v=20261116f">
+<link rel="stylesheet" href="style.css?v=20261116g">
 <script src="/echarts.min.js" defer></script>
-<script src="/assets/presentation.js?v=20261116f" type="module"></script>
-<script src="/assets/dashboard.js?v=20261116f" type="module"></script>
+<script src="/assets/presentation.js?v=20261116g" type="module"></script>
+<script src="/assets/dashboard.js?v=20261116g" type="module"></script>
 </head>
 <body>
 <div class="demo-notice" role="status">演示模式 · 当前展示程序生成的行情与资金样本。数据接入方式见各图来源说明。</div>
@@ -39,7 +39,7 @@
       </div>
     </div>
     <!-- observatory-switch -->
-    <div class="hero-heading"><div><p class="eyebrow">ETF MARKET OBSERVATORY</p><h1>ETF 资金观测台<span class="title-dot">.</span></h1></div><span class="market-label"><i></i>中国市场 · 沪深 ETF</span></div>
+    <div class="hero-heading"><div><p class="eyebrow">ETF MARKET OBSERVATORY</p><h1>ETF 资金观测台<span class="title-dot">.</span></h1></div><div class="hero-status"><span class="market-label"><i></i>中国市场 · 沪深 ETF</span><div class="freshness" id="freshness" data-state="idle" aria-live="polite"><span class="freshness-dot"></span><span id="freshnessText">行情等待开盘</span><small id="freshnessDetail">本地 —</small></div></div></div>
     <div class="overview" aria-label="市场概览">
       <a class="metric-card" href="#chart"><span class="metric-label">核心 ETF 成交额 <span>↗</span></span><strong id="overviewAmount">—</strong><span class="metric-foot" id="overviewAmountDate">等待当日行情</span></a>
       <a class="metric-card" href="#chartBroad"><span class="metric-label">宽基最新净流入 <span>↗</span></span><strong id="overviewFlow">—</strong><span class="metric-foot" id="overviewFlowDate">等待日度数据</span></a>

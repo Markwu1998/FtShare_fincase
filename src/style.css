@@ -54,3 +54,20 @@ button{border:1px solid var(--line);border-radius:8px;padding:7px 11px;backgroun
 #marketFinancing .chart-wrap+.chart-wrap{margin-top:14px}
 #marketIndustry .data-note,#marketFunds .data-note,#marketFinancing .data-note{margin-bottom:10px}
 .wrap:has(#marketIndustry) .nav-sections{flex-wrap:wrap}
+
+/* Data freshness pill in the page header */
+.hero-status{display:flex;align-items:center;justify-content:flex-end;gap:14px;flex-wrap:wrap;padding-bottom:5px}
+.freshness{display:flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font-size:11px;white-space:nowrap}
+.freshness .freshness-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+.freshness small{font-size:10px;color:inherit;opacity:.8}
+.freshness[data-state="ok"]{border-color:var(--accent);color:var(--accent)}
+.freshness[data-state="ok"] .freshness-dot{background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.freshness[data-state="warn"]{border-color:#d69b29;color:#8a5a00;background:#fff7e6}
+.freshness[data-state="warn"] .freshness-dot{background:#d69b29}
+.freshness[data-state="alert"]{border-color:#ce4657;color:#a11d2c;background:#fff0f1;animation:freshness-pulse 1.8s infinite}
+.freshness[data-state="alert"] .freshness-dot{background:#ce4657}
+.freshness[data-state="closed"],.freshness[data-state="idle"]{color:var(--muted)}
+@keyframes freshness-pulse{0%,100%{box-shadow:0 0 0 0 rgba(206,70,87,.25)}50%{box-shadow:0 0 0 6px rgba(206,70,87,0)}}
+[data-theme="dark"] .freshness[data-state="warn"]{background:rgba(214,155,41,.12);color:#f1bd63;border-color:rgba(214,155,41,.5)}
+[data-theme="dark"] .freshness[data-state="alert"]{background:rgba(255,138,151,.12);color:#ff8a97;border-color:rgba(255,138,151,.5)}
+@media(max-width:700px){.hero-status{gap:8px;padding-bottom:0}.freshness{font-size:10px;padding:6px 9px}.freshness small{display:none}}

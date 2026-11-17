@@ -72,3 +72,11 @@ test('burst announcement carries name, time, amount and level',()=>{
   const text=burstAnnouncement({symbol:'510330.SH',level:3,last:'14:57',peak:{end:'14:57',window:5,amount:2077969313,ratios:[10.26],level:3}},new Map([['510330.SH','华夏300']]));
   assert.match(text,/华夏300/);assert.match(text,/14点57分/);assert.match(text,/5分钟20.78亿元/);assert.match(text,/极端放量/);assert.match(text,/10.3倍/);
 });
+
+test('a later gap does not blank the radar before the gap',()=>{
+  const{seed,live}=fixture();
+  live.cumulative=live.bars.map((_,i)=>i<=10?i+1:null);
+  live.bars[11]=5;live.coverage[11]=20;
+  const s=evaluateRadar(seed,live);
+  assert.equal(s.last,10);assert.equal(s.amount,11);
+});

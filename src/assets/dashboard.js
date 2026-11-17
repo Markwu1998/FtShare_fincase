@@ -27,6 +27,23 @@ function renderSource(){
  document.querySelectorAll('.chart-source').forEach(e=>e.hidden=!rq);
 }
 function tag(id,text,kind=''){const e=$(id);if(e){e.textContent=text;e.className='tag '+kind;}}
+function renderFreshness(){
+ const el=$('freshness');if(!el)return;
+ const now=new Date(Date.now()+8*3600000),hm=now.toISOString().slice(11,16),day=now.getUTCDay(),local=now.toISOString().slice(11,19);
+ const trading=day>0&&day<6&&((hm>='09:30'&&hm<='11:30')||(hm>='13:00'&&hm<='15:00'));
+ let state='idle',text='行情等待开盘',detail='本地 '+local;
+ if(seed?.demo){state='idle';text='离线演示 · 固定样本';}
+ else if(live&&live.date&&live.date===now.toISOString().slice(0,10)&&live.last_complete_minute){
+  const quoteMs=Date.parse(live.date+'T'+live.last_complete_minute+':00+08:00'),latency=Math.max(0,(Date.now()-quoteMs)/1000);
+  const duration=latency>=60?Math.floor(latency/60)+'分'+String(Math.round(latency%60)).padStart(2,'0')+'秒':Math.round(latency)+'秒';
+  if(trading){state=latency>180||live.cache?.stale?'alert':latency>90?'warn':'ok';text='行情 '+live.last_complete_minute+' · 延时 '+duration;}
+  else if(hm>'11:30'&&hm<'13:00'){state='closed';text='午间休市 · 行情 '+live.last_complete_minute;}
+  else if(hm>='15:00'){state='closed';text='已收盘 · 行情 '+live.last_complete_minute;}
+  else {state='closed';text='非交易时段 · 行情 '+live.last_complete_minute;}
+ }
+ else if(day===0||day===6){state='closed';text='周末休市';}
+ el.dataset.state=state;const t=$('freshnessText');if(t)t.textContent=text;const d=$('freshnessDetail');if(d)d.textContent=detail;
+}
 function saved(key){try{return JSON.parse(localStorage.getItem(storageKey(key))||'null');}catch{return null;}}
 function save(key,value){try{localStorage.setItem(storageKey(key),JSON.stringify(value));}catch{}}
 function safely(label,job){try{return job();}catch(error){console.error(label+'暂不可用');return null;}}
@@ -301,6 +318,7 @@ async function refresh(){
 function tick(){
  if(loading)return;
  if(live&&live.date&&!live.replay&&live.date!==cst().slice(0,10)){live=null;location.reload();return;}
+ renderFreshness();
  remaining--;const hm=cst().slice(11,16),day=new Date(Date.now()+8*3600000).getUTCDay(),trading=day>0&&day<6&&((hm>='09:15'&&hm<='11:35')||(hm>='12:55'&&hm<='15:10'));
  if(seed.demo)tag('tagCountdown','离线演示 · 固定样本 · '+Math.max(0,remaining)+'秒后检查');
  else tag('tagCountdown',(trading?'盘中':'非交易时段')+' · '+Math.max(0,remaining)+'秒后读取缓存');
@@ -335,7 +353,7 @@ try{
  const dates=Object.keys(seed.minutes).sort().reverse();for(const d of dates){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').appendChild(op);}picked=dates[0]||'';$('cumDate').value=picked;renderCum();
  $('cumDate').addEventListener('change',async()=>{picked=$('cumDate').value;if(picked&&!seed.minutes[picked]){try{seed.minutes[picked]=await get('/api/cumulative?date='+picked);}catch(e){tag('tagUpdate',e.message,'warn');}}renderCum();});
  window.addEventListener('resize',()=>Object.values(charts).forEach(c=>c.resize()));
- await refresh();window.__ETF_APP_READY=true;
+ await refresh();renderFreshness();window.__ETF_APP_READY=true;
  const s=document.createElement('script');s.src='/assets/brush.js';document.head.appendChild(s);brushLoaded=true;
  remaining=60;setInterval(tick,1000);
 }catch(e){tag('tagUpdate','看板加载失败：'+e.message,'err');console.error('Dashboard initialization failed');}
