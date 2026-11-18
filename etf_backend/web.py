@@ -19,6 +19,7 @@ from .crowding import DEFAULT_PATH as CROWDING_PATH, validate_snapshot as valida
 from .crowding_extra import MODULES, path_for, validate_extra
 from .model import BASKET, CATEGORIES, DEFAULT_STATUS, FORMULA, SLOTS, finite
 from .provider import CHINA
+from .sources import load_config as load_source_config, realtime_entries, source_descriptions, source_entries
 
 ASSETS = {
     "/style.css": "src/style.css", "/echarts.min.js": "src/echarts.min.js",
@@ -32,15 +33,19 @@ ASSETS = {
 }
 
 
-def validate_seed(seed, mode):
+def validate_seed(seed, mode, source_id=None):
     history = seed["history"]
     dates = history["dates"]
+    seed_source = seed.get("source", {}).get("id")
+    if source_id and seed_source and seed_source != source_id:
+        raise ValueError("Seed source does not match requested source")
     if seed["schema"] != 1 or seed["formula"] != FORMULA or seed["categories"] != CATEGORIES or not dates or (
             dates != sorted(set(dates)) or not all(len(history[key]) == len(dates) for key in (
                 "idx", "amount", "netflow", "flow_coverage", "flow_expected"))):
         raise ValueError("Invalid snapshot")
-    if mode == "live" and (seed.get("demo") or seed["provider"] != "RQData" or seed["minute_slots"] != SLOTS):
-        raise ValueError("Live mode requires an RQData snapshot")
+    if mode == "live" and (seed.get("demo") or seed["provider"] not in {"RQData", "DDB"} or
+                           seed["minute_slots"] != SLOTS):
+        raise ValueError("Live mode requires a supported daily snapshot")
     if mode == "demo" and not (seed.get("demo") and seed["provider"] == "Demo"):
         raise ValueError("Invalid demo snapshot")
     if {fund["symbol"] for fund in seed["universe"] if fund["is_core_basket"]} != set(BASKET):
@@ -134,10 +139,34 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
         radar = os.environ.get("ENABLE_RADAR") == "1"
     if allow_replay is None:
         allow_replay = os.environ.get("RQDATA_ALLOW_REPLAY") == "1"
-    seed_path = ROOT / ("data/demo-seed.json" if demo else
-                        (seed_file or os.environ.get("FTSHARE_SEED_FILE", "data/private/rqdata-seed.json")))
+    if demo:
+        source_config = {"default": "demo", "realtime_default": "demo", "sources": [], "realtime_sources": []}
+        seed_paths = {"demo": ROOT / "data/demo-seed.json"}
+        default_source = "demo"
+        realtime_default = "demo"
+        daily_entries = []
+        realtime_entries_list = []
+    elif seed_file:
+        source_config = {"default": "rqdata", "realtime_default": "rqdata", "sources": [], "realtime_sources": []}
+        seed_paths = {"rqdata": ROOT / (seed_file or os.environ.get(
+            "FTSHARE_SEED_FILE", "data/private/rqdata-seed.json"))}
+        default_source = "rqdata"
+        realtime_default = "rqdata"
+        daily_entries = [{"id": "rqdata", "label": "RQData", "seed": str(seed_paths["rqdata"])}]
+        realtime_entries_list = [{"id": "rqdata", "label": "RQData", "kind": "realtime"}]
+    else:
+        source_config = load_source_config()
+        daily_entries = source_entries(source_config)
+        realtime_entries_list = realtime_entries(source_config)
+        seed_paths = {entry["id"]: ROOT / entry["seed"] for entry in daily_entries}
+        if os.environ.get("FTSHARE_SEED_FILE"):
+            seed_paths["rqdata"] = ROOT / os.environ["FTSHARE_SEED_FILE"]
+        default_source = source_config.get("default") or (daily_entries[0]["id"] if daily_entries else "rqdata")
+        realtime_default = source_config.get("realtime_default") or "rqdata"
     cache_path = ROOT / (cache_file or os.environ.get("FTSHARE_LIVE_CACHE_FILE", "data/private/rqdata-live.json"))
-    archive = Archive(seed_path, lambda value: validate_seed(value, mode))
+    archives = {source_id: Archive(path, lambda value, source_id=source_id: validate_seed(value, mode, source_id))
+                for source_id, path in seed_paths.items()}
+    archive = archives.get(default_source) or next(iter(archives.values()))
     cache = Archive(cache_path, validate_cache)
     crowding_path = ROOT / (crowding_file or os.environ.get("CROWDING_FILE") or CROWDING_PATH)
     crowding = Archive(crowding_path, validate_crowding)
@@ -168,6 +197,47 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
 
     def error(message, code, status):
         return response({"error": message, "code": code}, status)
+
+    def source_status():
+        values = []
+        loaded = {source_id: archives[source_id].load() for source_id in archives}
+        today = datetime.now(CHINA).date().isoformat()
+        known_dates = set()
+        for seed in loaded.values():
+            if seed:
+                known_dates.update(seed.get("history", {}).get("dates", []))
+        expected = max((day for day in known_dates if day < today), default=None)
+        for entry in daily_entries:
+            source_id = entry["id"]
+            seed = loaded.get(source_id)
+            if seed is None:
+                values.append({"id": source_id, "label": entry.get("label", source_id), "kind": "daily",
+                               "ready": False, "default": source_id == default_source,
+                               "reason": "快照尚未构建", "capabilities": entry.get("capabilities", [])})
+                continue
+            meta = seed.get("source") or {}
+            ready = meta.get("readiness", "ready") == "ready"
+            reason = meta.get("reason")
+            if expected and (seed.get("latest_flow_date") or "") < expected:
+                ready = False
+                reason = f"最新份额 {seed.get('latest_flow_date') or '无'}，目标 {expected}"
+            values.append({"id": source_id, "label": entry.get("label", seed.get("provider", source_id)),
+                           "kind": "daily", "ready": ready,
+                           "default": source_id == default_source,
+                           "latest_market_date": seed.get("latest_market_date"),
+                           "latest_flow_date": seed.get("latest_flow_date"),
+                           "built_at": seed.get("built_at"),
+                           "capabilities": meta.get("capabilities") or entry.get("capabilities", []),
+                           "descriptions": source_descriptions(source_id),
+                           "reason": reason})
+        realtime = []
+        for entry in realtime_entries_list:
+            realtime.append({"id": entry["id"], "label": entry.get("label", entry["id"]), "kind": "realtime",
+                             "ready": entry["id"] == "rqdata" and cache.load() is not None,
+                             "default": entry["id"] == realtime_default,
+                             "capabilities": entry.get("capabilities", [])})
+        return {"default": default_source, "realtime_default": realtime_default,
+                "sources": values, "realtime_sources": realtime}
 
     def current_events():
         snapshot = events.load()
@@ -247,16 +317,31 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             return FileResponse(ROOT / ASSETS[key], headers={"Cache-Control": "no-cache"})
         if key == "/favicon.ico":
             return Response(status_code=204)
-        if key not in {"/api/health", "/api/board", "/api/live", "/api/history", "/api/cumulative", "/api/daily"}:
+        if key not in {"/api/sources", "/api/health", "/api/board", "/api/live", "/api/history",
+                       "/api/cumulative", "/api/daily"}:
             return error("页面不存在", "not_found", 404)
-        seed = archive.load()
+        if key == "/api/sources":
+            return response(source_status())
+        source_id = request.query_params.get("source") or default_source
+        selected = archives.get(source_id)
+        if selected is None:
+            return error("未知的日频数据源", "source_unknown", 400)
+        status_map = {item["id"]: item for item in source_status()["sources"]}
+        if not demo and not status_map.get(source_id, {}).get("ready"):
+            return error(status_map.get(source_id, {}).get("reason") or "该数据源尚未就绪",
+                         "source_not_ready", 409)
+        seed = selected.load()
         if seed is None:
-            return error("历史归档尚未就绪", "history_not_ready", 503)
+            return error("该数据源快照尚未就绪", "source_not_ready", 409)
+        source = seed["provider"]
         if key == "/api/health":
+            status = source_status()
             return response({"provider": source, "mode": mode, "sources": seed["sources"],
                              "configured": not demo and (cache_path.is_file() or bool(seed.get("live_snapshot"))),
                              "history_built_at": seed["built_at"], "formula": seed["formula"],
                              "flow_policy": seed["flow_policy"], "funds": len(seed["universe"]),
+                             "daily_sources": status["sources"], "default_source": default_source,
+                             "realtime_sources": status["realtime_sources"],
                              "cloud_update": seed.get("cloud_update"), "update_policy": DEFAULT_STATUS})
         if key == "/api/board":
             return response(seed if demo else {**seed, "update_policy": DEFAULT_STATUS})
@@ -284,9 +369,16 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                 for f in seed["universe"][offset:offset + 8]]})
         if demo:
             return response(demo_live(seed))
+        realtime_id = request.query_params.get("realtime_source") or realtime_default
+        realtime_entry = next((item for item in realtime_entries_list if item["id"] == realtime_id), None)
+        if realtime_entry is None:
+            return error("未知的实时行情源", "realtime_source_unknown", 400)
+        if realtime_id != "rqdata":
+            return error("该实时行情源尚未接入", "realtime_source_not_ready", 409)
+        realtime_label = realtime_entry.get("label", "RQData")
         entry = cache.load() or {}
         live = entry.get("value") or seed.get("live_snapshot")
-        if live and live.get("provider") == source and live.get("slots") == seed["minute_slots"] and (
+        if live and live.get("provider") == realtime_label and live.get("slots") == seed["minute_slots"] and (
                 allow_replay or not live.get("replay")):
             replay = bool(live.get("replay")) and allow_replay
             if not replay and live.get("date") != datetime.now(CHINA).date().isoformat():

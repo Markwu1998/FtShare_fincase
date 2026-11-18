@@ -6,10 +6,10 @@
 <meta name="theme-color" content="#f2f6f6">
 <title>市场拥挤度观测台</title>
 <script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
-<link rel="stylesheet" href="/style.css?v=20261116i">
+<link rel="stylesheet" href="/style.css?v=20261118b">
 <script src="/echarts.min.js" defer></script>
-<script src="/assets/presentation.js?v=20261116i" type="module"></script>
-<script src="/assets/crowding.js?v=20261116i" type="module"></script>
+<script src="/assets/presentation.js?v=20261118b" type="module"></script>
+<script src="/assets/crowding.js?v=20261118b" type="module"></script>
 </head>
 <body>
 <button class="nav-backdrop" id="navBackdrop" aria-label="关闭图表导航" hidden></button>
@@ -27,7 +27,7 @@
 <main class="wrap">
   <header class="top" id="top">
     <div class="top-line">
-      <a class="brand" href="#top"><span>RQData<span class="brand-product">MARKET CROWDING</span></span></a>
+      <a class="brand" href="#top"><span>ETF<span class="brand-product">CROWDING</span></span></a>
       <div class="header-actions">
         <div class="theme-switch crowding-theme" role="group" aria-label="切换主题">
           <button type="button" data-theme-choice="light">浅色</button>
@@ -98,7 +98,7 @@
       </div>
       <p class="data-note" id="industryStatus" role="status">正在读取周度快照</p>
       <div class="chart-wrap"><div class="chart" id="marketIndustryChart"></div></div>
-      <details class="gap-report"><summary>计算口径</summary><p>市值用周末有效成分，成交额汇总周内逐日有效成分。按周末 RQData 申万一级分类，分子分母均剔除银行、非银金融和石油石化。固定申万 2014 版待 Wind API 核验。按各期实际占比识别第一行业并标注区间峰值。</p></details>
+      <details class="gap-report"><summary>计算口径</summary><p>市值用周末有效成分，成交额汇总周内逐日有效成分。按周末申万一级分类，分子分母均剔除银行、非银金融和石油石化。固定申万 2014 版待 Wind API 核验。按各期实际占比识别第一行业并标注区间峰值。</p></details>
     </div>
   </section>
   <section class="part" id="marketFunds">

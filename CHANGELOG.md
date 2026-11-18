@@ -2,6 +2,11 @@
 
 ## 未发布
 
+- 日频数据源支持 RQData / DDB 切换：新增 `config/data-sources.json`、DDB 适配器、`/api/sources`、多 seed 读取和 `?source=`；DDB 在 `fund_etf_nr` 未达到目标交易日时自动标记未就绪并返回 409。
+- 页面改为中性品牌：标题/页头/页脚/图表说明不再以 RQData 作为主品牌，只保留 `ETF FLOW / ETF 资金观测台`；日频源与实时源分别显示来源标识。
+- 页头新增“日频数据源”和“实时行情源”两个自定义下拉；实时源目前只有 RQData，位置和 API 已预留。
+- 图表字段说明改为后端 `descriptions` 驱动，随日频源切换；不再固定显示 RQData 字段。
+- 新增 `scripts/update-sources.ps1`，可顺序构建 RQData 与 DDB seed（DDB 失败不阻断 RQData）。
 - 修复日初盘中区域误显前一日收盘数据与页面反复刷新：只恢复当日 localStorage 行情，跨日只重载一次并清除旧缓存；API 请求改为 `no-store`，避免浏览器缓存绕过 `/api/live` 的当日校验。
 - 语音语速范围扩展到 Web Speech API 规范上限 **0.10–10.00×**（步进 0.05×）；具体浏览器/语音引擎可能对极端值再做截断。
 - 语音语速范围从 0.70–1.50× 扩展到 **0.50–2.00×**，仍按 0.05× 步进。

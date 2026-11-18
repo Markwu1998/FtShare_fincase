@@ -13,20 +13,139 @@ const cst=()=>seed?.demo?seed.demo.as_of+'T15:00:00.000Z':new Date(Date.now()+8*
 const storageKey=key=>'ftshare-oss:'+document.documentElement.dataset.dataMode+':'+key;
 let broadSelection=null,broadResetZoom=false,broadView='flow',broadExpanded=false;
 let seed,live,loading=false,remaining=1,picked='',brushLoaded=false;
-async function get(path){const r=await fetch(path,{cache:'no-store',signal:AbortSignal.timeout(30000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources','RQData'].includes(d.provider))throw new Error('数据来源校验失败');return d;}
+let sourceCatalog={sources:[],realtime_sources:[],default:'rqdata',realtime_default:'rqdata'};
+let dailySource='rqdata',realtimeSource='rqdata',sourceMeta=null;
+const originalNotes=new Map();
+function sourceLabel(){return sourceMeta?.label||seed?.provider||'RQData';}
+function realtimeLabel(){return sourceCatalog.realtime_sources?.find(s=>s.id===realtimeSource)?.label||'RQData';}
+function withSource(path){
+ const u=new URL(path,location.origin);
+ if(u.pathname==='/api/board'||u.pathname==='/api/health'||u.pathname==='/api/history'||u.pathname==='/api/cumulative')u.searchParams.set('source',dailySource);
+ if(u.pathname==='/api/live')u.searchParams.set('realtime_source',realtimeSource);
+ return u.pathname+u.search;
+}
+async function get(path){
+ const r=await fetch(withSource(path),{cache:'no-store',signal:AbortSignal.timeout(30000)});
+ const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');
+ if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources','RQData','DDB'].includes(d.provider))throw new Error('数据来源校验失败');
+ return d;
+}
+async function rawGet(path){
+ const r=await fetch(path,{cache:'no-store',signal:AbortSignal.timeout(15000)});
+ const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');return d;
+}
 function matchingLive(value){
- const provider=seed.provider==='FTShare+PublicSources'?'FTShare':seed.provider;
+ const provider=seed.source?.realtime_source?.label||(seed.provider==='FTShare+PublicSources'?'FTShare':seed.provider==='DDB'?'RQData':seed.provider);
  return value?.provider===provider&&value.slots?.length===seed.minute_slots.length&&value.slots.every((slot,i)=>slot===seed.minute_slots[i]);
 }
 function renderSource(){
- const rq=seed.provider==='RQData';
- const text=seed.demo?'演示数据：程序生成的行情与资金样本。':rq
-   ?'行情：RQData。'+(seed.source_audit?.fund_provider==='RQData'?'净申赎按 RQData 份额与单位净值估算。':seed.latest_flow_date?'净申赎数据沿用既有归档。':'日度份额与净值待接入。')
-   :'历史归档：'+seed.provider+'。净申赎估算按交易日期对齐。';
+ const label=sourceLabel(),realtime=realtimeLabel();
+ const text=seed.demo?'演示数据：程序生成的行情与资金样本。'
+  :`日频：${label}${seed.source_audit?.fund_provider===label?'，净申赎按该源份额与单位净值估算':''}。实时：${realtime}。`;
  document.querySelectorAll('footer').forEach(e=>e.textContent=text);
- document.querySelectorAll('.chart-source').forEach(e=>e.hidden=!rq);
+ const policy=$('sourcePolicy');if(policy)policy.textContent=`日频数据来自 ${label}；盘中行情来自 ${realtime}。`;
+ const daily=$('dailyBadge'),rt=$('realtimeBadge');
+ if(daily)daily.textContent='日频：'+label;
+ if(rt)rt.textContent='实时：'+realtime;
+ renderSourceNotes();
 }
 function tag(id,text,kind=''){const e=$(id);if(e){e.textContent=text;e.className='tag '+kind;}}
+function noteItem(item){
+ return '<div class="source-item"><dt>'+escape(item.label||'')+'</dt><dd><code>'+escape(item.code||'')+'</code><span>'+escape(item.note||'')+'</span></dd></div>';
+}
+function renderSourceNotes(){
+ document.querySelectorAll('.chart-source').forEach(box=>{
+  if(!originalNotes.has(box)){const content=box.querySelector('.source-content');originalNotes.set(box,content?content.innerHTML:'');}
+  if(!sourceMeta){const content=box.querySelector('.source-content');if(content)content.innerHTML=originalNotes.get(box);box.hidden=false;return;}
+  const key=box.dataset.sourceFor,content=box.querySelector('.source-content'),items=sourceMeta?.descriptions?.[key];
+  if(items?.length&&content){
+   content.innerHTML='<dl>'+items.map(noteItem).join('')+'</dl>';
+   box.hidden=false;
+  }else if(sourceMeta?.id==='rqdata'){
+   if(content)content.innerHTML=originalNotes.get(box);box.hidden=false;
+  }else box.hidden=true;
+  const label=box.querySelector('.source-label');if(label)label.textContent='数据源与字段';
+ });
+}
+function sourceOption(source,active,realtime=false){
+ const dot=source.ready?'':'warn';
+ const detail=source.ready
+  ?(realtime?'实时推送':(source.latest_flow_date||source.latest_market_date||'—')+(source.default?' · 默认':''))
+  :(source.reason||'未就绪');
+ return '<button class="source-option'+(active?' is-active':'')+'" data-source="'+escape(source.id)+'" role="option" aria-selected="'+active+'"'+(source.ready?'':' aria-disabled="true" disabled')+'>'
+  +'<span class="source-dot '+dot+'"></span><span><b>'+escape(source.label)+'</b><small>'+escape(detail)+'</small></span>'
+  +(active?'<span class="source-check">✓</span>':'')+'</button>';
+}
+function renderSourceControls(){
+ const daily=$('dailySourceMenu'),realtime=$('realtimeSourceMenu');
+ if(daily){
+  daily.innerHTML=(sourceCatalog.sources||[]).map(s=>sourceOption(s,s.id===dailySource)).join('')
+   +'<div class="source-menu-foot" data-source-info>数据源说明…</div>';
+  daily.querySelectorAll('[data-source]').forEach(button=>button.addEventListener('click',()=>switchDailySource(button.dataset.source)));
+  daily.querySelector('[data-source-info]')?.addEventListener('click',openSourceDialog);
+ }
+ if(realtime){
+  realtime.innerHTML=(sourceCatalog.realtime_sources||[]).map(s=>sourceOption(s,s.id===realtimeSource,true)).join('')
+   +'<div class="source-menu-foot" data-source-info>更多实时源（预留）</div>';
+  realtime.querySelectorAll('[data-source]').forEach(button=>button.addEventListener('click',()=>switchRealtimeSource(button.dataset.source)));
+  realtime.querySelector('[data-source-info]')?.addEventListener('click',openSourceDialog);
+ }
+ const label=$('dailySourceLabel'),dot=$('dailySourceDot'),rlabel=$('realtimeSourceLabel'),rdot=$('realtimeSourceDot');
+ if(label)label.textContent=sourceLabel();
+ if(rlabel)rlabel.textContent=realtimeLabel();
+ if(dot)dot.className='source-dot'+(sourceMeta?.ready?'':' warn');
+ if(rdot)rdot.className='source-dot muted';
+}
+function updateSourceUrl(){
+ const url=new URL(location.href);url.searchParams.set('source',dailySource);url.searchParams.set('realtime_source',realtimeSource);
+ history.replaceState(null,'',url);
+}
+async function switchDailySource(id){
+ if(id===dailySource)return;
+ const target=(sourceCatalog.sources||[]).find(source=>source.id===id);
+ if(!target?.ready){tag('tagUpdate',target?.reason||'该数据源尚未就绪','warn');return;}
+ const previous=dailySource,previousMeta=sourceMeta;
+ dailySource=id;sourceMeta=target;
+ try{
+  seed=await get('/api/board');
+  save('ftshare-board-v1:'+id,seed);
+  localStorage.setItem('ftshare-daily-source',id);
+  document.querySelectorAll('.source-menu').forEach(menu=>menu.hidden=true);
+  updateSourceUrl();renderSourceControls();renderSource();renderDaily();renderCum();if(radar)radar.render(seed,live);
+  tag('tagUpdate','已切换到 '+target.label+' 日频','ok');
+ }catch(error){
+  dailySource=previous;sourceMeta=previousMeta;renderSourceControls();
+  tag('tagUpdate',target.label+' 切换失败：'+error.message,'err');
+ }
+}
+async function switchRealtimeSource(id){
+ if(id===realtimeSource)return;
+ const target=(sourceCatalog.realtime_sources||[]).find(source=>source.id===id);
+ if(!target?.ready){tag('tagUpdate',target?.reason||'该实时源尚未接入','warn');return;}
+ realtimeSource=id;localStorage.setItem('ftshare-realtime-source',id);updateSourceUrl();
+ live=null;await refresh();renderSourceControls();renderSource();
+}
+function openSourceDialog(){
+ document.querySelectorAll('.source-menu').forEach(menu=>menu.hidden=true);
+ const body=$('sourceDialogBody');if(!body)return;
+ body.innerHTML=(sourceCatalog.sources||[]).map(source=>'<div class="source-source-row"><b>'+escape(source.label)+'</b> · '+(source.ready?'已就绪':'未就绪')+'<p>日频最近：'+(escape(source.latest_flow_date||'—'))+' · 行情：'+escape(source.latest_market_date||'—')+'</p>'
+  +(source.reason?'<p>'+escape(source.reason)+'</p>':'')+'</div>').join('')
+  +'<div class="source-source-row"><b>'+escape(realtimeLabel())+'</b> · 实时行情<p>当前实时源；分时、成交雷达、实时表格使用该来源。</p></div>';
+ $('sourceDialog').hidden=false;
+}
+function closeSourceDialog(){$('sourceDialog').hidden=true;}
+function setupSourcePickers(){
+ const daily=$('dailySourceButton'),realtime=$('realtimeSourceButton');
+ const toggle=(button,menu)=>{const open=menu.hidden;document.querySelectorAll('.source-menu').forEach(m=>m.hidden=true);menu.hidden=!open;button.setAttribute('aria-expanded',String(open));};
+ daily?.addEventListener('click',event=>{event.stopPropagation();toggle(daily,$('dailySourceMenu'));});
+ realtime?.addEventListener('click',event=>{event.stopPropagation();toggle(realtime,$('realtimeSourceMenu'));});
+ document.addEventListener('click',event=>{if(!event.target.closest('.source-picker'))document.querySelectorAll('.source-menu').forEach(m=>m.hidden=true);});
+ document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeSourceDialog();document.querySelectorAll('.source-menu').forEach(m=>m.hidden=true);}});
+ $('sourceInfo')?.addEventListener('click',openSourceDialog);
+ $('sourceDialogClose')?.addEventListener('click',closeSourceDialog);
+ $('sourceDialog')?.addEventListener('click',event=>{if(event.target.id==='sourceDialog')closeSourceDialog();});
+}
+
 function renderFreshness(){
  const el=$('freshness');if(!el)return;
  const now=new Date(Date.now()+8*3600000),hm=now.toISOString().slice(11,16),day=now.getUTCDay(),local=now.toISOString().slice(11,19);
@@ -304,7 +423,7 @@ async function refresh(){
  if(loading)return;loading=true;
  try{
   const health=await get('/api/health'),switched=(health.mode==='demo')!==Boolean(seed.demo);
-  if(switched||health.history_built_at!==seed.built_at){seed=await get('/api/board');if(!matchingLive(live))live=null;save('ftshare-board-v1',seed);renderSource();renderCloudStatus();renderDaily();for(const d of Object.keys(seed.minutes).sort().reverse())if(!$('cumDate').querySelector('option[value="'+d+'"]')){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').insertBefore(op,$('cumDate').options[1]||null);}}
+  if(switched||health.history_built_at!==seed.built_at){seed=await get('/api/board');if(!matchingLive(live))live=null;save('ftshare-board-v1:'+dailySource,seed);renderSource();renderCloudStatus();renderDaily();for(const d of Object.keys(seed.minutes).sort().reverse())if(!$('cumDate').querySelector('option[value="'+d+'"]')){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').insertBefore(op,$('cumDate').options[1]||null);}}
   const next=await get('/api/live');
   if(!matchingLive(next))throw new Error('行情与历史快照口径不一致');
   live=combineLive(next,live);if(!live.replay)save('ftshare-last-live-v1',live);safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);safely('日度图表',renderDaily);if(radar)safely('异动雷达',()=>radar.render(seed,live));
@@ -335,9 +454,15 @@ function tick(){
 }
 window.addEventListener('ftshare:theme-change',()=>{if(!seed)return;safely('主题切换',renderDaily);if(live)safely('实时图表',renderMinute);safely('累计图表',renderCum);});
 try{
- try{seed=await get('/api/board');save('ftshare-board-v1',seed);}catch(error){seed=saved('ftshare-board-v1');if(!seed?.broad||!seed?.history)throw error;tag('tagUpdate','正在显示上次成功加载的历史数据','warn');}
+ try{sourceCatalog=await rawGet('/api/sources');}catch{sourceCatalog={sources:[],realtime_sources:[],default:'rqdata',realtime_default:'rqdata'};}
+ const params=new URLSearchParams(location.search),pick=(id,list,fallback)=>list.some(s=>s.id===id&&s.ready)?id:fallback;
+ dailySource=pick(params.get('source')||localStorage.getItem('ftshare-daily-source'),sourceCatalog.sources||[],sourceCatalog.default||'rqdata');
+ realtimeSource=pick(params.get('realtime_source')||localStorage.getItem('ftshare-realtime-source'),sourceCatalog.realtime_sources||[],sourceCatalog.realtime_default||'rqdata');
+ sourceMeta=(sourceCatalog.sources||[]).find(s=>s.id===dailySource)||null;
+ renderSourceControls();setupSourcePickers();updateSourceUrl();
+ try{seed=await get('/api/board');save('ftshare-board-v1:'+dailySource,seed);}catch(error){seed=saved('ftshare-board-v1:'+dailySource);if(!seed?.broad||!seed?.history)throw error;tag('tagUpdate','正在显示上次成功加载的历史数据','warn');}
  renderSource();
- const sourceNote=document.querySelector('#sourcePolicy');if(sourceNote)sourceNote.textContent=seed.demo?'离线生成的演示样本。':'网页读取后台发布的历史快照和盘中缓存，成员及分类使用项目配置。';
+ renderSourceControls();
  renderCloudStatus();
  if(!$('etfTable').innerHTML)$('etfTable').innerHTML=seed.universe.filter(f=>f.is_core_basket).map(f=>'<tr><td>'+escape(f.symbol.slice(0,6))+'</td><td>'+escape(f.name)+'</td><td class="num">--</td><td class="num">--</td><td class="num">--</td></tr>').join('');
  $('universeText').textContent='宽基分类：'+seed.universe.length+'只ETF，按当前跟踪指数分组回溯（含增强ETF），从上市日起纳入。累计遇缺失日停止，日期与原因可展开查看。';

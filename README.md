@@ -1,14 +1,14 @@
-# RQData · ETF 资金与市场拥挤度观测台
+# ETF 资金与市场拥挤度观测台
 
 **发现成交异动，跟踪宽基资金，从盘中观察到盘后复盘。**
 
-**数据服务：RQData**
+**数据服务：RQData（日频可选择 DDB）**
 
 Python 网页服务提供两个平级入口。ETF 资金观测台（`/`）用于观察盘中交易和 ETF 资金变化，市场拥挤度观测台（`/crowding`）用于跟踪沪深 A 股成交集中度、大小盘风格、指数行业、公募重仓及融资宏观指标。
 
 [Python 启动、采集与回放](docs/python-backend.md) · [运行与运维手册](docs/operations.md) · [文档目录](docs/index.md) · [RQData 官方文档](https://www.ricequant.com/doc/rqdata/python/index-rqdatac)
 
-**RQData · ETF 异动雷达（20/60 日双基准） · 20 只核心 ETF · 12 类宽基 · 9 张分析图 · 市场拥挤度观测台**
+**ETF 异动雷达（20/60 日双基准） · 20 只核心 ETF · 12 类宽基 · 9 张分析图 · 市场拥挤度观测台**
 
 ![ETF资金观测台预览](docs/preview.jpg)
 

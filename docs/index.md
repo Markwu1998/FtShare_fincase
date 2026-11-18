@@ -15,6 +15,8 @@
 | 文档 | 内容 |
 |---|---|
 | [数据与计算](data.md) | RQData 接入、净申赎口径、快照结构、增量更新与容量 |
+| [RQData / DDB 日频对照](data-sources-rqdata-ddb.md) | 两个日频源的接口映射、完整性、一致性与切换建议 |
+| [日频数据源切换设计](data-source-switching-design.md) | 双源架构、API、一键切换语义与 UI 效果 |
 | [图表接口](chart-interfaces.md) | 每张图对应的 RQData 方法与字段 |
 | [雷达规则](radar-preview.md) | 20/60 日双基准、5 分钟窗口、状态判定 |
 | [雷达窗口回放](radar-window-review.md) | 离线回放与诊断 |

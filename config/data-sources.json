@@ -1,0 +1,53 @@
+{
+  "default": "rqdata",
+  "realtime_default": "rqdata",
+  "sources": [
+    {
+      "id": "rqdata",
+      "label": "RQData",
+      "kind": "daily",
+      "seed": "data/private/rqdata-seed.json",
+      "capabilities": [
+        "bars",
+        "turnover",
+        "volume",
+        "index",
+        "nav",
+        "premium",
+        "shares",
+        "netflow",
+        "scale",
+        "splits",
+        "calendar"
+      ]
+    },
+    {
+      "id": "ddb",
+      "label": "DDB",
+      "kind": "daily",
+      "seed": "data/private/ddb-seed.json",
+      "capabilities": [
+        "bars",
+        "turnover",
+        "volume",
+        "index",
+        "nav",
+        "premium",
+        "shares",
+        "netflow",
+        "scale",
+        "splits"
+      ],
+      "minute_seed": "data/private/rqdata-seed.json"
+    }
+  ],
+  "realtime_sources": [
+    {
+      "id": "rqdata",
+      "label": "RQData",
+      "kind": "realtime",
+      "cache": "data/private/rqdata-live.json",
+      "capabilities": ["bars", "tick", "index"]
+    }
+  ]
+}

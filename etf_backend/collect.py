@@ -11,6 +11,7 @@ import io
 from . import provider
 from .model import (BASKET, CATEGORIES, COLORS, FLOW_POLICY, FORMULA, INDEX, SLOTS, before, eligible, finite,
                     fund_flows, iso_utc, minute_basket, stamp, trading_minute)
+from .sources import DDBAdapter, load_config as load_source_config, source_capabilities, source_entry
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,7 +37,7 @@ def publish(path, value):
         pending.unlink(missing_ok=True)
 
 
-def history_snapshot(market, records, universe, config, end, closes=None):
+def history_snapshot(market, records, universe, config, end, closes=None, source="RQData"):
     funds = universe["funds"]
     members = {f["symbol"]: f for f in funds}
     if len(members) != len(funds) or {f["symbol"] for f in funds if f.get("is_core_basket")} != set(BASKET):
@@ -153,7 +154,12 @@ def history_snapshot(market, records, universe, config, end, closes=None):
         raise ValueError("RQData data did not pass snapshot coverage checks")
     built = iso_utc(datetime.now(timezone.utc))
     coverage = [core.get(d, (None, 0, len(BASKET))) for d in dates]
-    return {"schema": 1, "provider": "RQData", "sources": ["RQData"], "built_at": built, "formula": FORMULA,
+    source_id = "ddb" if source == "DDB" else "rqdata"
+    return {"schema": 1, "provider": source, "sources": [source], "built_at": built, "formula": FORMULA,
+            "source": {"id": source_id, "label": source, "kind": "daily", "capabilities": source_capabilities(source),
+                       "realtime_source": {"id": "rqdata", "label": "RQData"},
+                       "built_at": built, "latest_market_date": max(index), "latest_flow_date": latest,
+                       "readiness": "ready"},
             "flow_policy": FLOW_POLICY, "universe_policy": {"policy": universe["policy"], "eligibility": "max(inception_date, listed_date)"},
             "universe": funds, "categories": CATEGORIES, "colors": COLORS, "calendar": calendar, "minute_slots": SLOTS,
             "history": {"dates": dates, "amount": [amounts[d] for d in dates], "idx": [index.get(d) for d in dates],
@@ -162,7 +168,8 @@ def history_snapshot(market, records, universe, config, end, closes=None):
             "broad": broad, "broad_metrics": metrics, "minutes": minutes, "latest_flow_date": latest, "latest_market_date": max(index),
             "core_fund_daily": {"date": latest, "captured_at": built,
                                 "rows": [{"symbol": s, **by_fund[s][latest]} for s in BASKET]},
-            "source_audit": {"provider": "RQData", "fund_provider": "RQData",
+            "source_audit": {"provider": source, "fund_provider": source, "daily_source": source,
+                             "realtime_source": "RQData",
                              "missing_days": sum(d <= latest and value is None for d, value in zip(broad["dates"], broad["total"]))}}
 
 
@@ -236,7 +243,9 @@ def main():
     parser.add_argument("mode", choices=["history", "live", "crowding", "burst-replay"])
     parser.add_argument("--end", type=lambda s: datetime.fromisoformat(s).date().isoformat(),
                         default=datetime.now(provider.CHINA).date().isoformat())
-    parser.add_argument("--seed", default=os.environ.get("FTSHARE_SEED_FILE", "data/private/rqdata-seed.json"))
+    parser.add_argument("--seed", default=None)
+    parser.add_argument("--source", choices=["rqdata", "ddb"], default=os.environ.get("FTSHARE_DAILY_SOURCE", "rqdata"))
+    parser.add_argument("--source-config", default=os.environ.get("FTSHARE_SOURCE_CONFIG"))
     parser.add_argument("--cache", default=os.environ.get("FTSHARE_LIVE_CACHE_FILE", "data/private/rqdata-live.json"))
     parser.add_argument("--config", default=os.environ.get("MARKET_DATA_CONFIG_FILE"))
     parser.add_argument("--start", type=lambda s: datetime.fromisoformat(s).date().isoformat())
@@ -314,13 +323,18 @@ def main():
             publish(args.cache, cache)
             print(json.dumps({"date": value["date"], "through": value["last_complete_minute"], "close": True}))
         elif args.mode == "history":
-            previous = read(args.seed) if Path(args.seed).is_file() else None
+            source_config = load_source_config(args.source_config)
+            entry = source_entry(source_config, args.source)
+            seed_path = Path(args.seed) if args.seed else ROOT / entry["seed"]
+            if args.source == "rqdata" and os.environ.get("FTSHARE_SEED_FILE") and not args.seed:
+                seed_path = ROOT / os.environ["FTSHARE_SEED_FILE"]
+            previous = read(seed_path) if seed_path.is_file() else None
             config = read(ROOT / "config/collection.json")
             if args.config:
                 config.update(read(args.config))
-            if config.get("provider", "RQData") != "RQData" or config.get("fund_history") is False or (
+            if config.get("fund_history") is False or (
                     type(config["minute_days"]) is not int or config["minute_days"] < 0):
-                raise ValueError("Invalid RQData collection configuration")
+                raise ValueError("Invalid collection configuration")
             recoveries = {fund["symbol"]: fund["flow_evidence"] for fund in (previous or {}).get("universe", [])
                           if fund.get("flow_evidence")}
             overrides = ROOT / "data/private/flow-recoveries.json"
@@ -338,24 +352,40 @@ def main():
                 # Only the overlap window is re-queried; merge_history keeps older days.
                 config = {**config, "flow_start": cutoff, "market_start": cutoff}
             start = before(min(config["flow_start"], config["market_start"]), 14)
-            market = provider.collect(rqdatac, {"kind": "history", "symbols": BASKET + [INDEX], "start": start,
-                                                "end": args.end, "market_start": config["market_start"],
-                                                "minute_days": config["minute_days"]})
-            funds = provider.fund_history([f["symbol"] for f in universe["funds"]], start, args.end)["funds"]
-            close_end = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
-            closes = provider.traded_closes(rqdatac, list(funds), config["flow_start"], close_end)
-            snapshot = history_snapshot(market, funds, universe, config, args.end, closes)
+            source_label = "RQData" if args.source == "rqdata" else "DDB"
+            if args.source == "rqdata":
+                market = provider.collect(rqdatac, {"kind": "history", "symbols": BASKET + [INDEX], "start": start,
+                                                    "end": args.end, "market_start": config["market_start"],
+                                                    "minute_days": config["minute_days"]})
+                funds = provider.fund_history([f["symbol"] for f in universe["funds"]], start, args.end)["funds"]
+                close_end = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
+                closes = provider.traded_closes(rqdatac, list(funds), config["flow_start"], close_end)
+                snapshot = history_snapshot(market, funds, universe, config, args.end, closes, source="RQData")
+            else:
+                adapter = DDBAdapter(source_config)
+                target = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
+                status = adapter.status(target)
+                if not status.ready:
+                    raise ValueError(f"DDB source not ready: {status.reason}")
+                market, fund_records, closes = adapter.collect_history(start, args.end, 0)
+                funds = fund_records["funds"]
+                snapshot = history_snapshot(market, funds, universe, {**config, "minute_days": 0}, args.end,
+                                            closes, source="DDB")
+                minute_seed = ROOT / entry.get("minute_seed", "data/private/rqdata-seed.json")
+                if minute_seed.is_file():
+                    snapshot["minutes"] = read(minute_seed).get("minutes", {})
             if any(metric["latest"] is None for metric in snapshot["broad_metrics"].values()):
-                raise ValueError("RQData broad metrics contain no valid data")
+                raise ValueError(f"{source_label} broad metrics contain no valid data")
             if recent:
                 snapshot = merge_history(previous, snapshot)
             snapshot = preserve_previous(previous, snapshot)
             if previous is not None:
                 validate_replacement(previous, snapshot)
-            publish(args.seed, snapshot)
-            print(json.dumps({"market_through": snapshot["latest_market_date"], "flow_through": snapshot["latest_flow_date"],
-                              "minute_days": len(snapshot["minutes"]), "recent": recent,
-                              "broad_days": len(snapshot["broad"]["dates"])}))
+            snapshot["source"]["capabilities"] = source_capabilities(source_label)
+            publish(seed_path, snapshot)
+            print(json.dumps({"source": source_label, "market_through": snapshot["latest_market_date"],
+                              "flow_through": snapshot["latest_flow_date"], "minute_days": len(snapshot["minutes"]),
+                              "recent": recent, "broad_days": len(snapshot["broad"]["dates"])}))
         elif args.replay:
             live_run(rqdatac, universe["funds"], args.cache, args.replay)
         else:
@@ -370,7 +400,7 @@ def main():
                     traceback.print_exc(file=handle)
             except OSError:
                 pass
-        parser.exit(1, f"RQData {args.mode} failed ({type(error).__name__}). Check configuration and data coverage.\n")
+        parser.exit(1, f"{args.source.upper()} {args.mode} failed ({type(error).__name__}). Check configuration and data coverage.\n")
 
 
 def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, symbols):
@@ -439,6 +469,9 @@ def merge_history(previous, current):
     merged["latest_flow_date"] = current["latest_flow_date"]
     merged["latest_market_date"] = current["latest_market_date"]
     merged["built_at"] = current["built_at"]
+    merged["provider"] = current["provider"]
+    merged["sources"] = current["sources"]
+    merged["source"] = current.get("source")
     merged["source_audit"] = {**current["source_audit"],
                               "missing_days": sum(day <= merged["latest_flow_date"] and value is None
                                                   for day, value in zip(broad["dates"], broad["total"]))}

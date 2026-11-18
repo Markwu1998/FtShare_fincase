@@ -4,6 +4,23 @@
 
 核心篮子的唯一来源是 `config/basket.json`；`scripts/basket.py` 负责校验（恰好 20 只、不重复、成员在 `config/universe.json` 中）并同步到 Python/Node 常量与 `is_core_basket` 标记。
 
+## 日频数据源
+
+`config/data-sources.json` 定义日频源注册与默认源：
+
+- `rqdata`：默认，`data/private/rqdata-seed.json`；
+- `ddb`：可选，`data/private/ddb-seed.json`，需要 DDB 的 `fund_etf_nr` 保持更新；
+- 实时源独立注册，目前只有 `rqdata`（`data/private/rqdata-live.json`）。
+
+构建：
+
+```powershell
+& .\scripts\python-backend.ps1 history -Arguments @('--source','rqdata','--recent')
+& .\scripts\python-backend.ps1 history -Arguments @('--source','ddb','--recent')
+```
+
+DDB 页面只有在核心 20 只的 `fund_etf_nr` 最后日期达到目标 flow 日期时才会标记为可用；未就绪时 `/api/board?source=ddb` 返回 409，不会用旧份额数据。
+
 同一归属日净申赎使用当日份额减去经折算校正的上一交易日份额，再乘原始单位净值。上市前不纳入。上市首日前值、净值或折算证据不足时保留缺口，区间累计从起始日计算并在首个缺口停止。
 
 ## 历史校正记录

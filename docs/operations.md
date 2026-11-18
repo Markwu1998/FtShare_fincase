@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | 网页服务 | `scripts/python-backend.ps1 web` | 8080 | 只读 | FastAPI；ETF 页 `/`，拥挤度页 `/crowding` |
 | 盘中采集器 | `scripts/python-backend.ps1 -Mode live -Arguments @('--watch')` | 无 | 只写 | RQData 推送；09:15 预载基准，09:30 订阅 |
-| 日频更新 | `scripts/python-backend.ps1 history -Arguments @('--recent')` | 无 | 只写 | 每日 08:20 / 12:30，滚动补齐上一交易日 |
+| 日频更新 | `scripts/python-backend.ps1 history -Arguments @('--source','rqdata','--recent')` | 无 | 只写 | 每日 08:20 / 12:30；DDB 可选 `--source ddb` |
 | 逐 ETF 放量 | 由采集器自动写入 | 无 | 只写 | `etf-burst/live.json` + 每日归档 |
 | 拥挤度 | `scripts/python-backend.ps1 crowding` | 无 | 只写 | 四个独立归档，按模块增量 |
 
@@ -27,6 +27,8 @@
 - 日频数据存在「披露延迟」：`08:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
 - 日切：`/api/live` 只返回**当日**（Asia/Shanghai）缓存；盘前或跨日后返回 503，页面自动刷新后盘中区域为空，09:30 新缓存到达后恢复。
 - 页头新鲜度：显示最新行情分钟、本地时间和延时；盘中延时 >90 秒变黄，>180 秒变红告警；午休/收盘显示中性的“午间休市/已收盘”。
+- 日频源可选 `RQData`（默认）或 `DDB`，页面按源读取对应 seed，不重启服务；DDB 的 `fund_etf_nr` 未达到目标交易日时自动标记未就绪，`/api/board?source=ddb` 返回 409。
+- 实时源独立：目前只有 `RQData`，页面保留实时源下拉，后续新增实时源时只需增加缓存与适配器。
 
 ---
 
@@ -96,7 +98,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 
 | DSH 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频更新 08:20` | 周一至周五 08:20 | `history --recent` + `crowding`，报告快照/拥挤度日期 |
+| `ETF 日频更新 08:20` | 周一至周五 08:20 | `update-sources.ps1`（RQData + 可选 DDB + crowding），报告各源日期/就绪状态 |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | 同上，补晚披露 |
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页与采集器，输出状态 |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，用当日 1m 线补全到 15:00 |
@@ -126,11 +128,11 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 | 北京时间 | 动作 | 谁负责 |
 |---|---|---|
 | 登录时 | 启动网页 + 采集器 | Windows 任务（可选）或手动 |
-| 08:20 | 日频增量更新 + 拥挤度日度更新 | DSH `ETF 日频更新 08:20` |
+| 08:20 | 日频增量更新（RQData + 可选 DDB）+ 拥挤度 | DSH `ETF 日频更新 08:20` |
 | 08:25 | 检查并启动网页/采集器 | DSH `ETF 开盘前启动 08:25` |
 | 09:15–09:30 | 采集器预载 60 日分钟基准 | 采集器 |
 | 09:30–15:02 | 实时推送，写盘中缓存 | 采集器 |
-| 12:30 | 第二次日频增量 + 拥挤度补采 | DSH `ETF 日频补采 12:30` |
+| 12:30 | 第二次日频增量（RQData + 可选 DDB）+ 拥挤度 | DSH `ETF 日频补采 12:30` |
 | 15:10 | 用当日 1m 线补全盘中缓存到 15:00 | DSH `ETF 收盘补全 15:10` |
 | 15:02 后 | 采集器空闲，等下一交易日 | 采集器 |
 
@@ -239,6 +241,23 @@ npm run demo:generate
 ```
 
 然后**重启网页与采集器**（`BASKET` 在进程启动时加载），最后 `.\status.cmd` 验证。
+
+### 4.5 日频数据源构建
+
+```powershell
+# RQData 默认源
+& .\scripts\python-backend.ps1 history -Arguments @('--source','rqdata','--recent')
+
+# DDB 可选源（需要 DDB_PASSWORD）
+& .\scripts\python-backend.ps1 history -Arguments @('--source','ddb','--recent')
+```
+
+- 源注册在 `config/data-sources.json`，默认 `rqdata`；
+- DDB 构建前会检查核心 20 只的 `fund_etf_nr` 最后日期；不满足目标日期直接失败，不覆盖旧 seed；
+- 页面读取 `/api/sources` 显示就绪状态，切换无需重启；
+- 双源顺序构建可执行 `scripts/update-sources.ps1`（DDB 失败只告警，不阻断 RQData）。
+
+DDB 环境变量见 `.env.example`：`DDB_HOST`、`DDB_PORT`、`DDB_USER`、`DDB_PASSWORD`。
 
 ---
 
