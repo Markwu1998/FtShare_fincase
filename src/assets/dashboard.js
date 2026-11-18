@@ -13,7 +13,7 @@ const cst=()=>seed?.demo?seed.demo.as_of+'T15:00:00.000Z':new Date(Date.now()+8*
 const storageKey=key=>'ftshare-oss:'+document.documentElement.dataset.dataMode+':'+key;
 let broadSelection=null,broadResetZoom=false,broadView='flow',broadExpanded=false;
 let seed,live,loading=false,remaining=1,picked='',brushLoaded=false;
-async function get(path){const r=await fetch(path,{cache:'default',signal:AbortSignal.timeout(30000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources','RQData'].includes(d.provider))throw new Error('数据来源校验失败');return d;}
+async function get(path){const r=await fetch(path,{cache:'no-store',signal:AbortSignal.timeout(30000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'数据暂不可用');if(document.documentElement.dataset.dataMode==='demo'?d.provider!=='Demo':!['FTShare','FTShare+PublicSources','RQData'].includes(d.provider))throw new Error('数据来源校验失败');return d;}
 function matchingLive(value){
  const provider=seed.provider==='FTShare+PublicSources'?'FTShare':seed.provider;
  return value?.provider===provider&&value.slots?.length===seed.minute_slots.length&&value.slots.every((slot,i)=>slot===seed.minute_slots[i]);
@@ -317,7 +317,16 @@ async function refresh(){
 }
 function tick(){
  if(loading)return;
- if(live&&live.date&&!live.replay&&live.date!==cst().slice(0,10)){live=null;location.reload();return;}
+ const today=cst().slice(0,10);
+ if(live&&live.date&&!live.replay&&live.date!==today){
+  live=null;
+  try{localStorage.removeItem('ftshare-last-live-v1');}catch{}
+  if(sessionStorage.getItem('ftshare-day-reload')!==today){
+   sessionStorage.setItem('ftshare-day-reload',today);
+   location.reload();
+  }
+  return;
+ }
  renderFreshness();
  remaining--;const hm=cst().slice(11,16),day=new Date(Date.now()+8*3600000).getUTCDay(),trading=day>0&&day<6&&((hm>='09:15'&&hm<='11:35')||(hm>='12:55'&&hm<='15:10'));
  if(seed.demo)tag('tagCountdown','离线演示 · 固定样本 · '+Math.max(0,remaining)+'秒后检查');
@@ -349,7 +358,7 @@ try{
   renderBroad();
  });
  safely('历史图表',renderDaily);safely('累计成交图表',renderCum);
- const lastLive=saved('ftshare-last-live-v1');if(matchingLive(lastLive)){live=lastLive;safely('已保存行情',renderMinute);tag('tagUpdate','已保存行情 '+live.date+' '+(live.last_complete_minute||'')+'；正在更新','warn');}
+ const lastLive=saved('ftshare-last-live-v1');if(matchingLive(lastLive)&&lastLive.date===cst().slice(0,10)){live=lastLive;safely('已保存行情',renderMinute);tag('tagUpdate','已保存行情 '+live.date+' '+(live.last_complete_minute||'')+'；正在更新','warn');}else{try{localStorage.removeItem('ftshare-last-live-v1');}catch{}}
  const dates=Object.keys(seed.minutes).sort().reverse();for(const d of dates){const op=document.createElement('option');op.value=d;op.textContent=d;$('cumDate').appendChild(op);}picked=dates[0]||'';$('cumDate').value=picked;renderCum();
  $('cumDate').addEventListener('change',async()=>{picked=$('cumDate').value;if(picked&&!seed.minutes[picked]){try{seed.minutes[picked]=await get('/api/cumulative?date='+picked);}catch(e){tag('tagUpdate',e.message,'warn');}}renderCum();});
  window.addEventListener('resize',()=>Object.values(charts).forEach(c=>c.resize()));
