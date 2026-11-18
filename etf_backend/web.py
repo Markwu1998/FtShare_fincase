@@ -24,7 +24,7 @@ from .sources import load_config as load_source_config, realtime_entries, source
 ASSETS = {
     "/style.css": "src/style.css", "/echarts.min.js": "src/echarts.min.js",
     **{f"/assets/{name}": f"src/assets/{name}" for name in (
-        "dashboard.js", "flow-math.js", "radar.js", "radar-math.js", "brush.js", "presentation.js", "crowding.js", "ftai-mark.svg"
+        "dashboard.js", "data-source.js", "flow-math.js", "radar.js", "radar-math.js", "brush.js", "presentation.js", "crowding.js", "ftai-mark.svg"
     )},
     "/licenses/MIT.txt": "LICENSE",
     "/licenses/echarts-LICENSE.txt": "third_party/echarts/LICENSE",
@@ -179,8 +179,8 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
     index = (ROOT / "src/index.html").read_text(encoding="utf-8").replace(
         'data-data-mode="demo"', f'data-data-mode="{mode}"').replace(
         'data-radar="off"', 'data-radar="on"' if radar else 'data-radar="off"')
-    source = "Demo" if demo else "RQData"
     crowding_page = (ROOT / "src/crowding.html").read_text(encoding="utf-8")
+
     def with_observatory_switch(page, active):
         tabs = "".join(
             f'<a href="{url}"' + (' aria-current="page"' if active == url else '') + f'>{name}</a>'
@@ -192,16 +192,35 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
     index = with_observatory_switch(index, "/")
     crowding_page = with_observatory_switch(crowding_page, "/crowding")
 
-    def response(value, status=200):
-        return JSONResponse(value, status, headers={"Cache-Control": "no-store", "X-Data-Provider": source})
+    def response(value, status=200, provider=None):
+        headers = {"Cache-Control": "no-store"}
+        if provider:
+            headers["X-Data-Provider"] = provider
+        return JSONResponse(value, status, headers=headers)
 
     def error(message, code, status):
         return response({"error": message, "code": code}, status)
 
+    status_lock = Lock()
+    status_cache = {"key": None, "value": None}
+
     def source_status():
         values = []
-        loaded = {source_id: archives[source_id].load() for source_id in archives}
         today = datetime.now(CHINA).date().isoformat()
+
+        def file_version(path):
+            try:
+                info = path.stat()
+                return (info.st_ino, info.st_size, info.st_mtime_ns)
+            except OSError:
+                return None
+
+        key = (today, tuple((source_id, file_version(archives[source_id].path))
+                            for source_id in archives))
+        with status_lock:
+            if status_cache["key"] == key:
+                return status_cache["value"]
+        loaded = {source_id: archives[source_id].load() for source_id in archives}
         known_dates = set()
         for seed in loaded.values():
             if seed:
@@ -221,6 +240,9 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             if expected and (seed.get("latest_flow_date") or "") < expected:
                 ready = False
                 reason = f"最新份额 {seed.get('latest_flow_date') or '无'}，目标 {expected}"
+            elif expected and (seed.get("latest_market_date") or "") < expected:
+                ready = False
+                reason = f"最新行情 {seed.get('latest_market_date') or '无'}，目标 {expected}"
             values.append({"id": source_id, "label": entry.get("label", seed.get("provider", source_id)),
                            "kind": "daily", "ready": ready,
                            "default": source_id == default_source,
@@ -236,8 +258,12 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                              "ready": entry["id"] == "rqdata" and cache.load() is not None,
                              "default": entry["id"] == realtime_default,
                              "capabilities": entry.get("capabilities", [])})
-        return {"default": default_source, "realtime_default": realtime_default,
-                "sources": values, "realtime_sources": realtime}
+        result = {"default": default_source, "realtime_default": realtime_default,
+                  "sources": values, "realtime_sources": realtime}
+        with status_lock:
+            status_cache["key"] = key
+            status_cache["value"] = result
+        return result
 
     def current_events():
         snapshot = events.load()
@@ -333,29 +359,33 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
         seed = selected.load()
         if seed is None:
             return error("该数据源快照尚未就绪", "source_not_ready", 409)
-        source = seed["provider"]
+        provider_label = seed["provider"]
         if key == "/api/health":
             status = source_status()
-            return response({"provider": source, "mode": mode, "sources": seed["sources"],
+            return response({"provider": provider_label, "mode": mode, "sources": seed["sources"],
                              "configured": not demo and (cache_path.is_file() or bool(seed.get("live_snapshot"))),
                              "history_built_at": seed["built_at"], "formula": seed["formula"],
                              "flow_policy": seed["flow_policy"], "funds": len(seed["universe"]),
                              "daily_sources": status["sources"], "default_source": default_source,
                              "realtime_sources": status["realtime_sources"],
-                             "cloud_update": seed.get("cloud_update"), "update_policy": DEFAULT_STATUS})
+                             "cloud_update": seed.get("cloud_update"), "update_policy": DEFAULT_STATUS},
+                            provider=provider_label)
         if key == "/api/board":
-            return response(seed if demo else {**seed, "update_policy": DEFAULT_STATUS})
+            return response(seed if demo else {**seed, "update_policy": DEFAULT_STATUS},
+                            provider=provider_label)
         if key == "/api/history":
             history = seed["history"]
-            return response({"provider": source, "rows": [{"date": d, "amount": a, "idx": i} for d, a, i in
-                                                         zip(history["dates"], history["amount"], history["idx"])]})
+            return response({"provider": provider_label, "rows": [{"date": d, "amount": a, "idx": i} for d, a, i in
+                                                          zip(history["dates"], history["amount"], history["idx"])]},
+                            provider=provider_label)
         if key == "/api/cumulative":
             day = request.query_params.get("date", "")
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
                 return error("查询参数无效", "invalid_date", 400)
             if day not in seed["minutes"]:
                 return error("该日期尚未归档", "not_archived", 404)
-            return response({"provider": source, "date": day, **seed["minutes"][day]})
+            return response({"provider": provider_label, "date": day, **seed["minutes"][day]},
+                            provider=provider_label)
         if key == "/api/daily":
             if not demo:
                 return error("日度数据由后台定时更新", "visitor_collection_disabled", 410)
@@ -364,11 +394,11 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                 return error("请选择有效的数据批次", "invalid_batch", 400)
             offset = int(batch) * 8
             dates = seed["history"]["dates"][-3:]
-            return response({"provider": source, "dates": dates, "funds": [
+            return response({"provider": provider_label, "dates": dates, "funds": [
                 {"symbol": f["symbol"], "days": {d: {"flow": seed["demo"]["fund_flows"][d].get(f["symbol"])} for d in dates}}
-                for f in seed["universe"][offset:offset + 8]]})
+                for f in seed["universe"][offset:offset + 8]]}, provider=provider_label)
         if demo:
-            return response(demo_live(seed))
+            return response(demo_live(seed), provider="Demo")
         realtime_id = request.query_params.get("realtime_source") or realtime_default
         realtime_entry = next((item for item in realtime_entries_list if item["id"] == realtime_id), None)
         if realtime_entry is None:
@@ -394,7 +424,7 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                 return error("盘中行情时间无效", "cache_not_ready", 503)
             return response({**live, "cache": {"mode": "background", "collected_at": live["fetched_at"],
                              "checked_at": entry.get("checked_at"), "stale": stale, "last_error": entry.get("last_error"),
-                             "refresh_seconds": 60}})
+                             "refresh_seconds": 60}}, provider=live.get("provider"))
         return error("后台行情尚未就绪；历史图表可继续查看", "cache_not_ready", 503)
 
     @app.middleware("http")

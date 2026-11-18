@@ -6,20 +6,18 @@ the requested flow date.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import os
 from pathlib import Path
+from typing import Protocol
 
-from .provider import CHINA
+from . import provider
+from .model import BASKET, INDEX, before
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "config/data-sources.json"
-CAPABILITIES = {
-    "RQData": ["bars", "turnover", "volume", "index", "nav", "premium", "shares", "netflow", "scale", "splits", "calendar"],
-    "DDB": ["bars", "turnover", "volume", "index", "nav", "premium", "shares", "netflow", "scale", "splits"],
-}
 
 
 @dataclass
@@ -31,6 +29,17 @@ class SourceStatus:
     latest_flow_date: str | None = None
     reason: str | None = None
     capabilities: list[str] | None = None
+
+
+class DailySource(Protocol):
+    id: str
+    label: str
+
+    def status(self, target: str) -> SourceStatus:
+        ...
+
+    def collect_history(self, start: str, end: str, minute_days: int = 0):
+        ...
 
 
 def dot(day: str) -> str:
@@ -53,8 +62,8 @@ def source_entry(config: dict, source_id: str) -> dict:
     raise KeyError(f"Unknown daily source: {source_id}")
 
 
-def source_capabilities(source_label: str) -> list[str]:
-    return CAPABILITIES.get(source_label, [])
+def source_capabilities(config: dict, source_id: str) -> list[str]:
+    return list(source_entry(config, source_id).get("capabilities", []))
 
 
 def realtime_entries(config: dict) -> list[dict]:
@@ -84,9 +93,41 @@ def source_descriptions(source_id: str) -> dict:
         "chartTypNorm": [
             {"label": "常态日分钟成交额", "code": "RQData get_price(1m)", "note": "使用 total_turnover。"},
         ],
+        "chartBroad": [
+            {"label": "ETF 份额与单位净值", "code": "RQData fund.get_shares / fund.get_nav",
+             "note": "日度份额与单位净值；缺失时保留缺口。"},
+            {"label": "折溢价", "code": "RQData get_price(1d, adjust_type='none') / fund.get_nav",
+             "note": "使用不复权收盘价与同日单位净值。"},
+        ],
+        "chartDAmt": [
+            {"label": "历史与当日成交额", "code": "RQData get_price(1d)",
+             "note": "使用 total_turnover。"},
+        ],
+        "chartDNf": [
+            {"label": "历史净申赎", "code": "RQData fund.get_shares / fund.get_nav",
+             "note": "按现有净申赎公式计算。"},
+        ],
+        "chartAmt": [
+            {"label": "核心 ETF 日成交额", "code": "RQData get_price(1d)",
+             "note": "使用 total_turnover。"},
+        ],
+        "chartNf": [
+            {"label": "核心 ETF 日净申赎", "code": "RQData fund.get_shares / fund.get_nav",
+             "note": "按现有净申赎公式计算。"},
+        ],
+        "etfTable": [
+            {"label": "核心 ETF 表", "code": "RQData get_price(1d) / fund.get_shares / fund.get_nav",
+             "note": "价格、成交额、涨跌幅与日度净申赎。"},
+        ],
+        "broadTable": [
+            {"label": "宽基成交额与指数", "code": "RQData get_price(1d) / index_components",
+             "note": "按宽基分类聚合。"},
+        ],
     }
     if source_id == "rqdata":
         return common
+    if source_id != "ddb":
+        return {}
     ddb = {
         "chart": [
             {"label": "ETF 日收盘/成交额", "code": "mkt_fundd.CLOSE_PRICE / TURNOVER_VALUE",
@@ -139,9 +180,38 @@ def source_descriptions(source_id: str) -> dict:
     return ddb
 
 
+class RQDataAdapter:
+    """Thin adapter over the existing RQData provider helpers."""
+
+    id = "rqdata"
+    label = "RQData"
+    snapshot_minute_days = None
+
+    def __init__(self, api, config: dict, universe: dict | None = None):
+        self.api = api
+        self.config = config
+        self.universe = universe or json.loads((ROOT / "config/universe.json").read_text(encoding="utf-8"))
+
+    def status(self, target: str) -> SourceStatus:
+        # The file-level/dynamic readiness check lives in web.py; collection
+        # itself only needs the provider to be available.
+        return SourceStatus(self.id, self.label, True)
+
+    def collect_history(self, start: str, end: str, minute_days: int = 0):
+        market = provider.collect(self.api, {
+            "kind": "history", "symbols": BASKET + [INDEX], "start": start, "end": end,
+            "market_start": self.config["market_start"], "minute_days": minute_days,
+        })
+        funds = provider.fund_history([fund["symbol"] for fund in self.universe["funds"]], start, end)["funds"]
+        close_end = min(end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
+        closes = provider.traded_closes(self.api, list(funds), self.config["flow_start"], close_end)
+        return market, {"funds": funds}, closes
+
+
 class DDBAdapter:
     id = "ddb"
     label = "DDB"
+    snapshot_minute_days = 0
 
     def __init__(self, config=None):
         self.config = config or load_config()
@@ -172,19 +242,32 @@ class DDBAdapter:
         core = self._core()
         try:
             frame = self.query(
-                f"select max(TRADE_DATE) as maxd from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
-                f"where TICKER_SYMBOL in {core!r}")
-            latest = str(frame.iloc[0]["maxd"])[:10] if len(frame) and frame.iloc[0]["maxd"] is not None else None
+                "select TICKER_SYMBOL,max(TRADE_DATE) as maxd "
+                "from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
+                f"where TICKER_SYMBOL in {core!r} group by TICKER_SYMBOL")
+            per_symbol = {str(row["TICKER_SYMBOL"]): str(row["maxd"])[:10]
+                          for _, row in frame.iterrows()} if len(frame) else {}
             market = self.query(
                 "select max(TRADE_DATE) as maxd from loadTable('dfs://hermes_etf_data','mkt_fundd') "
                 f"where TICKER_SYMBOL in {core!r}")
             market_latest = str(market.iloc[0]["maxd"])[:10] if len(market) else None
         except Exception as error:
             return SourceStatus(self.id, self.label, False, reason=f"DDB 查询失败：{type(error).__name__}")
-        if not latest or latest < target:
+        missing = [symbol for symbol in core if symbol not in per_symbol]
+        stale = [symbol for symbol in core if symbol in per_symbol and per_symbol[symbol] < target]
+        latest = min(per_symbol.values()) if per_symbol else None
+        if missing:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
-                                reason=f"fund_etf_nr 最后日期 {latest or '无'}，目标 {target}")
+                                reason=f"fund_etf_nr 缺少核心 ETF：{','.join(missing[:5])}")
+        if stale:
+            return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
+                                latest_flow_date=latest,
+                                reason=f"fund_etf_nr 有 {len(stale)} 只核心 ETF 未到 {target}")
+        if not market_latest or market_latest < target:
+            return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
+                                latest_flow_date=latest,
+                                reason=f"mkt_fundd 最后日期 {market_latest or '无'}，目标 {target}")
         return SourceStatus(self.id, self.label, True, latest_market_date=market_latest,
                             latest_flow_date=latest)
 
@@ -261,3 +344,14 @@ class DDBAdapter:
             chunk = values[i:i + batch]
             frames.append(self.query(template.format(values=chunk)))
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def build_source(source_id: str, config: dict, api=None, universe: dict | None = None,
+                 collection_config: dict | None = None) -> DailySource:
+    if source_id == "rqdata":
+        if api is None:
+            raise ValueError("RQData API is required")
+        return RQDataAdapter(api, collection_config or {}, universe)
+    if source_id == "ddb":
+        return DDBAdapter(config)
+    raise KeyError(f"Unknown daily source: {source_id}")

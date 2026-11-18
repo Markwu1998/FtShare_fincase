@@ -199,6 +199,17 @@ class BackendTests(unittest.TestCase):
         records["splits"] = [(days[1], 3)]
         self.assertIsNone(fund_flows(fund, records, days)[days[1]]["flow"])
 
+    def test_board_provider_header_is_request_scoped(self):
+        from starlette.requests import Request
+        from etf_backend.web import create_app
+
+        app = create_app("demo")
+        endpoint = next(r.endpoint for r in app.routes if r.path == "/{path:path}")
+        response = endpoint("api/board", Request({"type": "http", "path": "/api/board",
+                                                  "query_string": b"", "headers": []}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Data-Provider"], "Demo")
+
     def test_reload_keeps_last_valid_snapshot_and_rejects_losing_history(self):
         original = read(ROOT / "data/demo-seed.json")
         with tempfile.TemporaryDirectory() as directory:

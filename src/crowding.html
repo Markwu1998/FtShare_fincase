@@ -6,10 +6,10 @@
 <meta name="theme-color" content="#f2f6f6">
 <title>市场拥挤度观测台</title>
 <script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
-<link rel="stylesheet" href="/style.css?v=20261118b">
+<link rel="stylesheet" href="/style.css?v=20261118f">
 <script src="/echarts.min.js" defer></script>
-<script src="/assets/presentation.js?v=20261118b" type="module"></script>
-<script src="/assets/crowding.js?v=20261118b" type="module"></script>
+<script src="/assets/presentation.js?v=20261118f" type="module"></script>
+<script src="/assets/crowding.js?v=20261118f" type="module"></script>
 </head>
 <body>
 <button class="nav-backdrop" id="navBackdrop" aria-label="关闭图表导航" hidden></button>
@@ -94,11 +94,11 @@
       <div class="broad-controls">
         <label>指数 <select id="industryIndex"><option value="000300.XSHG">沪深300</option><option value="000905.XSHG">中证500</option></select></label>
         <label>指标 <select id="industryMetric"><option value="capital">市值占比</option><option value="turnover">成交额占比</option></select></label>
-        <label>行业 <select id="industryChoice"><option value="">每周第一行业</option></select></label>
+        <label>行业 <select id="industryChoice"><option value="">每日第一行业</option></select></label>
       </div>
-      <p class="data-note" id="industryStatus" role="status">正在读取周度快照</p>
+      <p class="data-note" id="industryStatus" role="status">正在读取日度快照</p>
       <div class="chart-wrap"><div class="chart" id="marketIndustryChart"></div></div>
-      <details class="gap-report"><summary>计算口径</summary><p>市值用周末有效成分，成交额汇总周内逐日有效成分。按周末申万一级分类，分子分母均剔除银行、非银金融和石油石化。固定申万 2014 版待 Wind API 核验。按各期实际占比识别第一行业并标注区间峰值。</p></details>
+      <details class="gap-report"><summary>计算口径</summary><p>市值用当日有效成分，成交额用当日有效成分。按申万一级分类（按周缓存），分子分母均剔除银行、非银金融和石油石化。固定申万 2014 版待 Wind API 核验。按各期实际占比识别第一行业并标注区间峰值。</p></details>
     </div>
   </section>
   <section class="part" id="marketFunds">

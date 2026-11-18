@@ -11,7 +11,7 @@ import io
 from . import provider
 from .model import (BASKET, CATEGORIES, COLORS, FLOW_POLICY, FORMULA, INDEX, SLOTS, before, eligible, finite,
                     fund_flows, iso_utc, minute_basket, stamp, trading_minute)
-from .sources import DDBAdapter, load_config as load_source_config, source_capabilities, source_entry
+from .sources import build_source, load_config as load_source_config, source_capabilities, source_entry
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -156,7 +156,7 @@ def history_snapshot(market, records, universe, config, end, closes=None, source
     coverage = [core.get(d, (None, 0, len(BASKET))) for d in dates]
     source_id = "ddb" if source == "DDB" else "rqdata"
     return {"schema": 1, "provider": source, "sources": [source], "built_at": built, "formula": FORMULA,
-            "source": {"id": source_id, "label": source, "kind": "daily", "capabilities": source_capabilities(source),
+            "source": {"id": source_id, "label": source, "kind": "daily", "capabilities": [],
                        "realtime_source": {"id": "rqdata", "label": "RQData"},
                        "built_at": built, "latest_market_date": max(index), "latest_flow_date": latest,
                        "readiness": "ready"},
@@ -291,9 +291,12 @@ def main():
                 daily.setdefault(day, {})[symbol] = volume
             run_burst_replay(args, burst_dir, q, sorted(daily), minutes, daily, replay_day, symbols)
             return
-        import rqdatac
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            rqdatac.init(connect_timeout=8, timeout=40)
+        api = None
+        if not (args.mode == "history" and args.source == "ddb"):
+            import rqdatac
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rqdatac.init(connect_timeout=8, timeout=40)
+            api = rqdatac
         if args.mode == "burst-replay":
             start = args.start or args.end
             warm = before(start, 130)
@@ -352,38 +355,33 @@ def main():
                 # Only the overlap window is re-queried; merge_history keeps older days.
                 config = {**config, "flow_start": cutoff, "market_start": cutoff}
             start = before(min(config["flow_start"], config["market_start"]), 14)
-            source_label = "RQData" if args.source == "rqdata" else "DDB"
-            if args.source == "rqdata":
-                market = provider.collect(rqdatac, {"kind": "history", "symbols": BASKET + [INDEX], "start": start,
-                                                    "end": args.end, "market_start": config["market_start"],
-                                                    "minute_days": config["minute_days"]})
-                funds = provider.fund_history([f["symbol"] for f in universe["funds"]], start, args.end)["funds"]
-                close_end = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
-                closes = provider.traded_closes(rqdatac, list(funds), config["flow_start"], close_end)
-                snapshot = history_snapshot(market, funds, universe, config, args.end, closes, source="RQData")
-            else:
-                adapter = DDBAdapter(source_config)
-                target = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
-                status = adapter.status(target)
-                if not status.ready:
-                    raise ValueError(f"DDB source not ready: {status.reason}")
-                market, fund_records, closes = adapter.collect_history(start, args.end, 0)
-                funds = fund_records["funds"]
-                snapshot = history_snapshot(market, funds, universe, {**config, "minute_days": 0}, args.end,
-                                            closes, source="DDB")
-                minute_seed = ROOT / entry.get("minute_seed", "data/private/rqdata-seed.json")
-                if minute_seed.is_file():
-                    snapshot["minutes"] = read(minute_seed).get("minutes", {})
+            adapter = build_source(args.source, source_config, api=api, universe=universe,
+                                   collection_config=config)
+            target = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
+            status = adapter.status(target)
+            if not status.ready:
+                raise ValueError(f"{adapter.label} source not ready: {status.reason}")
+            market, fund_records, closes = adapter.collect_history(start, args.end, config["minute_days"])
+            funds = fund_records["funds"]
+            minute_days = getattr(adapter, "snapshot_minute_days", None)
+            snapshot_config = config if minute_days is None else {**config, "minute_days": minute_days}
+            snapshot = history_snapshot(market, funds, universe, snapshot_config, args.end, closes,
+                                        source=adapter.label)
+            minute_seed = entry.get("minute_seed")
+            if minute_seed:
+                minute_path = ROOT / minute_seed
+                if minute_path.is_file():
+                    snapshot["minutes"] = read(minute_path).get("minutes", {})
             if any(metric["latest"] is None for metric in snapshot["broad_metrics"].values()):
-                raise ValueError(f"{source_label} broad metrics contain no valid data")
+                raise ValueError(f"{adapter.label} broad metrics contain no valid data")
             if recent:
                 snapshot = merge_history(previous, snapshot)
             snapshot = preserve_previous(previous, snapshot)
             if previous is not None:
                 validate_replacement(previous, snapshot)
-            snapshot["source"]["capabilities"] = source_capabilities(source_label)
+            snapshot["source"]["capabilities"] = source_capabilities(source_config, args.source)
             publish(seed_path, snapshot)
-            print(json.dumps({"source": source_label, "market_through": snapshot["latest_market_date"],
+            print(json.dumps({"source": adapter.label, "market_through": snapshot["latest_market_date"],
                               "flow_through": snapshot["latest_flow_date"], "minute_days": len(snapshot["minutes"]),
                               "recent": recent, "broad_days": len(snapshot["broad"]["dates"])}))
         elif args.replay:

@@ -86,7 +86,8 @@ function renderSummary() {
   byId('marketCapRatio').textContent = format(current.style.capital, 2, ' 倍');
   byId('marketCashRatio').textContent = format(current.style.turnover, 2, ' 倍');
   byId('marketCapDate').textContent = byId('marketCashDate').textContent = current.date;
-  byId('marketStatus').textContent = 'RQData · 沪深 A 股 · 归档 ' + first + ' 至 ' + last + ' · 当前图表 ' + rows.length + ' 个交易日';
+  const built = snapshot.built_at ? new Date(snapshot.built_at).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', hour12: false}) : '—';
+  byId('marketStatus').textContent = 'RQData · 日度 · 沪深 A 股 · 归档 ' + first + ' 至 ' + last + ' · 当前图表 ' + rows.length + ' 个交易日' + ' · 快照 ' + built;
 }
 
 function renderIndustrySeries(id, title, rows, weights, choice) {
@@ -113,14 +114,15 @@ function setIndustries(id, values) {
 }
 
 function renderIndustry() {
-  const {rows} = modules.industry;
+  const {rows, label_frequency: labelFrequency} = modules.industry;
   const index = byId('industryIndex'), metric = byId('industryMetric');
   const weights = row => row.indexes[index.value]?.[metric.value];
   setIndustries('industryChoice', rows.map(weights));
   const recent = rows.filter(row => Object.keys(weights(row) ?? {}).length).at(-1);
   const coverage = recent?.indexes[index.value];
-  byId('industryStatus').textContent = recent ? 'RQData · 最近有效周 ' + recent.date + ' · 行业覆盖 ' +
-    coverage.classified + '/' + coverage.expected + ' 只' : '所选指标暂缺有效数据';
+  byId('industryStatus').textContent = recent ? 'RQData · 日度 · 最近有效日 ' + recent.date + ' · 行业覆盖 ' +
+    coverage.classified + '/' + coverage.expected + ' 只' +
+    (labelFrequency === 'weekly' ? ' · 行业分类按周缓存' : '') : '所选指标暂缺有效数据';
   renderIndustrySeries('marketIndustryChart', index.selectedOptions[0].text + ' · ' + metric.selectedOptions[0].text,
     rows, weights, 'industryChoice');
 }
@@ -129,7 +131,7 @@ function renderFunds() {
   const {rows} = modules.funds;
   const recent = rows.at(-1);
   setIndustries('fundIndustry', rows.map(r => r.weights));
-  byId('fundStatus').textContent = 'RQData · 报告期 ' + recent.date + ' · 披露截至 ' + recent.published +
+  byId('fundStatus').textContent = 'RQData · 季度 · 报告期 ' + recent.date + ' · 披露截至 ' + recent.published +
     ' · 有持仓数据 ' + recent.funds + '/' + recent.expected + ' 只';
   renderIndustrySeries('marketFundChart', '季度前十大重仓股行业占比', rows, row => row.weights, 'fundIndustry');
 }
@@ -142,7 +144,7 @@ function renderFinancing() {
   }
   const dates = rows.map(r => r.date);
   const lastDate = key => rows.findLast(r => r[key] != null)?.date ?? '待发布';
-  byId('financingStatus').textContent = 'RQData · 融资余额截至 ' + lastDate('balance') +
+  byId('financingStatus').textContent = 'RQData · 日度 · 融资余额截至 ' + lastDate('balance') +
     ' · 市值/GDP 截至 ' + lastDate('gdp_share');
   const series = (name, key, axis = 0) => ({name, yAxisIndex: axis, data: rows.map(r => r[key] ?? null)});
   const index = picker.value ? [{name: indexes[picker.value], yAxisIndex: 2, data: rows.map(r => r.indexes?.[picker.value] ?? null)}] : [];
@@ -191,7 +193,7 @@ async function load() {
   byId('marketStatus').textContent = '正在读取市场日度快照';
   try {
     const query = new URLSearchParams({days: byId('marketDays').value, table_days: byId('marketTableDays').value});
-    const response = await fetch('/api/crowding?' + query, {signal: request.signal});
+    const response = await fetch('/api/crowding?' + query, {cache: 'no-store', signal: request.signal});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error);
     if (request.signal.aborted) return;

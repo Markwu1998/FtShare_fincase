@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | 网页服务 | `scripts/python-backend.ps1 web` | 8080 | 只读 | FastAPI；ETF 页 `/`，拥挤度页 `/crowding` |
 | 盘中采集器 | `scripts/python-backend.ps1 -Mode live -Arguments @('--watch')` | 无 | 只写 | RQData 推送；09:15 预载基准，09:30 订阅 |
-| 日频更新 | `scripts/python-backend.ps1 history -Arguments @('--source','rqdata','--recent')` | 无 | 只写 | 每日 08:20 / 12:30；DDB 可选 `--source ddb` |
+| 日频更新 | `scripts/python-backend.ps1 history -Arguments @('--source','rqdata','--recent')` | 无 | 只写 | 每日 09:20 总更新 / 12:30 补采；DDB 可选 `--source ddb` |
 | 逐 ETF 放量 | 由采集器自动写入 | 无 | 只写 | `etf-burst/live.json` + 每日归档 |
 | 拥挤度 | `scripts/python-backend.ps1 crowding` | 无 | 只写 | 四个独立归档，按模块增量 |
 
@@ -24,7 +24,7 @@
 
 - 网页**只读文件**，快照更新后按 `mtime` 自动热加载，**不需要重启**。
 - 盘中缓存由采集器写，网页不直接访问 RQData。
-- 日频数据存在「披露延迟」：`08:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
+- 日频数据存在「披露延迟」：`09:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
 - 日切：`/api/live` 只返回**当日**（Asia/Shanghai）缓存；盘前或跨日后返回 503，页面自动刷新后盘中区域为空，09:30 新缓存到达后恢复。
 - 页头新鲜度：显示最新行情分钟、本地时间和延时；盘中延时 >90 秒变黄，>180 秒变红告警；午休/收盘显示中性的“午间休市/已收盘”。
 - 日频源可选 `RQData`（默认）或 `DDB`，页面按源读取对应 seed，不重启服务；DDB 的 `fund_etf_nr` 未达到目标交易日时自动标记未就绪，`/api/board?source=ddb` 返回 409。
@@ -98,10 +98,13 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 
 | DSH 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频更新 08:20` | 周一至周五 08:20 | `update-sources.ps1`（RQData + 可选 DDB + crowding），报告各源日期/就绪状态 |
-| `ETF 日频补采 12:30` | 周一至周五 12:30 | 同上，补晚披露 |
+| `ETF 日频与拥挤度 09:20` | 周一至周五 09:20 | `update-daily-all.ps1`：RQData ETF + 日度拥挤度 + 融资 + 行业 |
+| `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
+| `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding`（RQData + 可选 DDB），补晚披露 |
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页与采集器，输出状态 |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，用当日 1m 线补全到 15:00 |
+
+08:20 旧任务已暂停，日频 ETF 合并到 09:20 总更新；12:30 仍保留 ETF/DDB 晚披露补采。
 
 说明：
 
@@ -128,11 +131,12 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 | 北京时间 | 动作 | 谁负责 |
 |---|---|---|
 | 登录时 | 启动网页 + 采集器 | Windows 任务（可选）或手动 |
-| 08:20 | 日频增量更新（RQData + 可选 DDB）+ 拥挤度 | DSH `ETF 日频更新 08:20` |
 | 08:25 | 检查并启动网页/采集器 | DSH `ETF 开盘前启动 08:25` |
+| 09:20 | RQData ETF + 日度拥挤度 + 融资 + 行业 | DSH `ETF 日频与拥挤度 09:20` |
+| 周六 09:00 | 公募（季度）更新 | DSH `ETF 周六公募拥挤度` |
 | 09:15–09:30 | 采集器预载 60 日分钟基准 | 采集器 |
 | 09:30–15:02 | 实时推送，写盘中缓存 | 采集器 |
-| 12:30 | 第二次日频增量（RQData + 可选 DDB）+ 拥挤度 | DSH `ETF 日频补采 12:30` |
+| 12:30 | 第二次日频增量（RQData + 可选 DDB，`-SkipCrowding`） | DSH `ETF 日频补采 12:30` |
 | 15:10 | 用当日 1m 线补全盘中缓存到 15:00 | DSH `ETF 收盘补全 15:10` |
 | 15:02 后 | 采集器空闲，等下一交易日 | 采集器 |
 
@@ -178,7 +182,7 @@ data/private/                     ← 已被 .gitignore 忽略
 ├─ rqdata-seed.json               历史快照（约 1.0 MB）
 ├─ rqdata-live.json               盘中缓存（约 18 KB，每轮覆盖）
 ├─ rqdata-crowding.json           拥挤度日度
-├─ rqdata-crowding-industry.json  行业（周度）
+├─ rqdata-crowding-industry.json  行业（日度）
 ├─ rqdata-crowding-funds.json     公募重仓（季度）
 ├─ rqdata-crowding-financing.json 融资宏观（日度）
 └─ etf-burst/
@@ -420,5 +424,5 @@ Unregister-ScheduledTask -TaskName FtShare-UpdateDaily -Confirm:$false
 | 端口统一 8080 | README、文档、启动脚本、`.env.example` 一致 |
 | `.env` UTF-8 | 启动脚本按 UTF-8 读取，中文注释不再吞行 |
 | 运维脚本 | `start-web.cmd`、`start-collector.cmd`、`update-daily.cmd`、`setup-tasks.cmd`、`status.cmd` |
-| DSH 定时任务 | 08:20 更新、12:30 补采、08:25 开盘前启动 |
+| DSH 定时任务 | 09:20 总更新、12:30 补采、08:25 开盘前启动 |
 | 采集器心跳 | `data/private/collector.heartbeat`，`start-collector.cmd` 据此防止重复启动 |

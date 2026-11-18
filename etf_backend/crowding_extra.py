@@ -1,4 +1,4 @@
-"""Independent archives for weekly industry, quarterly holdings and daily financing."""
+"""Independent archives for daily industry, quarterly holdings and daily financing."""
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -58,57 +58,66 @@ def shsz_symbol(symbol):
 
 
 def industry_rows(api, start, end):
-    since = date.fromisoformat(start)
-    since -= timedelta(days=since.weekday())
-    until = date.fromisoformat(end)
-    sunday = until + timedelta(days=6 - until.weekday())
-    weeks = defaultdict(list)
-    for d in api.get_trading_dates(since.isoformat(), sunday.isoformat()):
-        weeks[week_key(str(d))].append(str(d))
-    for dates in weeks.values():
-        if dates[-1] > end:
+    """Daily industry crowding, with weekly-cached industry labels.
+
+    Index membership and prices are evaluated every trading day. The SW level-1
+    classification is cached by ISO week because it changes infrequently; this
+    keeps a one-year rebuild practical while still producing daily rows.
+    """
+    days = [day(d) for d in api.get_trading_dates(start, end)]
+    if not days:
+        return
+    members = {}
+    for idx in INDEXES:
+        raw = {day(d): set(ids) for d, ids in
+               (api.index_components(idx, start_date=start, end_date=end) or {}).items()}
+        by_day, last = {}, set()
+        for d in days:
+            if d in raw:
+                last = set(raw[d])
+            by_day[d] = set(last)
+        members[idx] = by_day
+    symbols = {s for by_day in members.values() for ids in by_day.values() for s in ids}
+    capitals = data_by_day(api, symbols, start, end, capital=True)
+    cash = data_by_day(api, symbols, start, end)
+    missing_cash = {(d, s) for d in days for ids in (by_day[d] for by_day in members.values())
+                    for s in ids if cash.get(d, {}).get(s) is None}
+    for batch in batches({s for _, s in missing_cash}, 350):
+        frame = api.is_suspended(batch, start_date=start, end_date=end)
+        if frame is None:
             continue
-        as_of = dates[-1]
-        members = {
-            idx: {day(d): set(ids) for d, ids in (api.index_components(idx, start_date=dates[0], end_date=as_of) or {}).items()}
-            for idx in INDEXES
-        }
-        symbols = {s for days in members.values() for ids in days.values() for s in ids}
-        mapping = industries(api, symbols, as_of)
-        capitals = data_by_day(api, symbols, as_of, as_of, capital=True).get(as_of, {})
-        cash = data_by_day(api, symbols, dates[0], as_of)
-        missing_cash = {s for days in members.values() for d, ids in days.items() for s in ids
-                        if cash[d].get(s) is None}
-        for batch in batches(missing_cash, 350):
-            frame = api.is_suspended(batch, start_date=dates[0], end_date=as_of)
-            if frame is not None:
-                for d, row in frame.iterrows():
-                    for s in row.index[row.eq(True)]:
-                        cash[day(d)].setdefault(s, 0)
-                        if cash[day(d)][s] is None:
-                            cash[day(d)][s] = 0
+        for d, row in frame.iterrows():
+            for s in row.index[row.eq(True)]:
+                cash.setdefault(day(d), {}).setdefault(s, 0)
+                if cash[day(d)][s] is None:
+                    cash[day(d)][s] = 0
+    mapping = {}
+    for as_of in days:
+        key = week_key(as_of)
+        if key not in mapping:
+            mapping[key] = industries(api, symbols, as_of)
+        labels = mapping[key]
         data = {}
-        for (idx, days), count in zip(members.items(), (300, 500)):
+        for idx, count in zip(members, (300, 500)):
+            ids = members[idx].get(as_of, set())
             totals, turnover = defaultdict(float), defaultdict(float)
-            classified = sum(s in mapping for s in days.get(as_of, ()))
-            capital_valid = len(days.get(as_of, ())) == classified == count
-            turnover_valid = all(len(days.get(d, ())) == count for d in dates)
-            for d in dates:
-                for s in days.get(d, ()):
-                    name = mapping.get(s)
-                    if name in EXCLUDED:
-                        continue
-                    amount = cash[d].get(s)
-                    if name and amount is not None and amount >= 0:
-                        turnover[name] += amount
-                    else:
-                        turnover_valid = False
-                    if d == as_of:
-                        value = capitals.get(s)
-                        if name and value is not None and value > 0:
-                            totals[name] += value
-                        else:
-                            capital_valid = False
+            classified = sum(s in labels for s in ids)
+            capital_valid = len(ids) == classified == count
+            turnover_valid = len(ids) == count
+            for s in ids:
+                name = labels.get(s)
+                if name in EXCLUDED:
+                    continue
+                amount = cash.get(as_of, {}).get(s)
+                if name and amount is not None and amount >= 0:
+                    turnover[name] += amount
+                else:
+                    turnover_valid = False
+                value = capitals.get(as_of, {}).get(s)
+                if name and value is not None and value > 0:
+                    totals[name] += value
+                else:
+                    capital_valid = False
             data[idx] = {"capital": shares(totals) if capital_valid else {},
                          "turnover": shares(turnover) if turnover_valid else {},
                          "classified": classified, "expected": count}
@@ -285,9 +294,21 @@ def validate_extra(data, module):
     return data
 
 
+def _is_daily(rows):
+    if len(rows) < 3:
+        return True
+    gaps = [(date.fromisoformat(b["date"]) - date.fromisoformat(a["date"])).days
+            for a, b in zip(rows, rows[1:])]
+    return sum(1 for gap in gaps if gap <= 3) >= max(1, len(gaps) // 2)
+
+
 def update_extra(api, module, base, start, end):
     path = path_for(module, base)
     previous = validate_extra(read(path), module)["rows"] if path.is_file() else []
+    # The old industry archive was weekly; rebuild it as daily rather than
+    # mixing weekly and daily rows in one chart.
+    if module == "industry" and previous and not _is_daily(previous):
+        previous = []
     needs = {"industry": (370, 21), "funds": (450, 220), "financing": (370, 35)}
     initial, overlap = needs[module]
     end = min(end, (datetime.now(provider.CHINA).date() - timedelta(days=1)).isoformat())
@@ -298,6 +319,13 @@ def update_extra(api, module, base, start, end):
     fresh = list(collect(api, start, end))
     if not fresh and not previous:
         raise ValueError("RQData returned no crowding module observations")
+    if previous and module in {"industry", "financing"}:
+        last = previous[-1]["date"]
+        pending = [str(day) for day in api.get_trading_dates(
+            (date.fromisoformat(last) + timedelta(days=1)).isoformat(), end) if str(day) > last]
+        fresh_dates = {row["date"] for row in fresh}
+        if pending and not any(day in fresh_dates for day in pending):
+            raise ValueError(f"{module} returned no fresh observations after {last}")
     for r in fresh:
         old = rows.get(r["date"])
         if old and module == "funds" and (r["funds"] < old["funds"] or r["published"] < old["published"]):
@@ -312,6 +340,8 @@ def update_extra(api, module, base, start, end):
         rows[r["date"]] = r
     snapshot = {"provider": "RQData", "module": module, "built_at": iso_utc(datetime.now(provider.CHINA)),
                 "rows": [rows[d] for d in sorted(rows)]}
+    if module == "industry":
+        snapshot.update({"price_frequency": "daily", "label_frequency": "weekly"})
     if module == "financing":
         snapshot["indexes"] = FINANCE_INDEXES
     publish(path, validate_extra(snapshot, module))
