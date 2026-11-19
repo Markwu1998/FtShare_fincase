@@ -40,7 +40,7 @@ class BackendTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            publish(root / "replay/2026-11-13.json", {"provider": "RQData", "date": "2026-11-13",
+            publish(root / "replay/2026-11-13.json", {"schema_version": 2, "metric": "turnover", "unit": "CNY", "provider": "RQData", "date": "2026-11-13",
                     "replay": True, "events": [], "updated_at": "2026-11-13T15:00:00Z"})
             app = create_app("live", seed_file=root / "missing.json", burst_dir=root, radar=True)
             endpoint = next(r.endpoint for r in app.routes if r.path == "/{path:path}")
@@ -107,7 +107,7 @@ class BackendTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            snapshot = {"provider": "RQData", "date": datetime.now(CHINA).date().isoformat(),
+            snapshot = {"schema_version": 2, "metric": "turnover", "unit": "CNY", "provider": "RQData", "date": datetime.now(CHINA).date().isoformat(),
                         "events": [], "updated_at": "v1"}
             publish(root / "live.json", snapshot)
             app = create_app("live", radar=True, burst_dir=root)

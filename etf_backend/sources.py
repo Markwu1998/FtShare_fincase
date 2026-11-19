@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 from . import provider
-from .model import BASKET, INDEX, before
+from .model import BASKET, INDEX, before, fund_flows, finite
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "config/data-sources.json"
@@ -36,6 +36,9 @@ class DailySource(Protocol):
     label: str
 
     def status(self, target: str) -> SourceStatus:
+        ...
+
+    def target_date(self, cutoff: str) -> str:
         ...
 
     def collect_history(self, start: str, end: str, minute_days: int = 0):
@@ -78,8 +81,8 @@ def source_descriptions(source_id: str) -> dict:
     """Field notes rendered under each chart. Kept next to the adapter."""
     common = {
         "chart": [
-            {"label": "ETF 与指数分钟 K 线", "code": "RQData LiveMarketDataClient · bar_ / get_price(1m)",
-             "note": "盘中实时；启动/断线时用分钟线补齐。"},
+            {"label": "ETF 与指数分钟 K 线", "code": "RQData LiveMarketDataClient · tick_ 聚合 / bar_ 对账 / get_price(1m)",
+             "note": "默认 bar 正式确认、Tick 并行验证及分钟内候选；可配置 Tick 分钟驱动，缺口用分钟线补齐。"},
             {"label": "指数上一交易日收盘", "code": "RQData get_price(1d)", "note": "取不复权 close。"},
         ],
         "chartCum": [
@@ -94,7 +97,7 @@ def source_descriptions(source_id: str) -> dict:
             {"label": "常态日分钟成交额", "code": "RQData get_price(1m)", "note": "使用 total_turnover。"},
         ],
         "chartBroad": [
-            {"label": "ETF 份额与单位净值", "code": "RQData fund.get_shares / fund.get_nav",
+            {"label": "ETF 份额与单位净值", "code": "RQData fund.get_daily_units / fund.get_nav",
              "note": "日度份额与单位净值；缺失时保留缺口。"},
             {"label": "折溢价", "code": "RQData get_price(1d, adjust_type='none') / fund.get_nav",
              "note": "使用不复权收盘价与同日单位净值。"},
@@ -104,7 +107,7 @@ def source_descriptions(source_id: str) -> dict:
              "note": "使用 total_turnover。"},
         ],
         "chartDNf": [
-            {"label": "历史净申赎", "code": "RQData fund.get_shares / fund.get_nav",
+            {"label": "历史净申赎", "code": "RQData fund.get_daily_units / fund.get_nav / fund.get_split",
              "note": "按现有净申赎公式计算。"},
         ],
         "chartAmt": [
@@ -112,12 +115,12 @@ def source_descriptions(source_id: str) -> dict:
              "note": "使用 total_turnover。"},
         ],
         "chartNf": [
-            {"label": "核心 ETF 日净申赎", "code": "RQData fund.get_shares / fund.get_nav",
+            {"label": "核心 ETF 日净申赎", "code": "RQData fund.get_daily_units / fund.get_nav / fund.get_split",
              "note": "按现有净申赎公式计算。"},
         ],
         "etfTable": [
-            {"label": "核心 ETF 表", "code": "RQData get_price(1d) / fund.get_shares / fund.get_nav",
-             "note": "价格、成交额、涨跌幅与日度净申赎。"},
+            {"label": "核心 ETF 实时表", "code": "RQData LiveMarketDataClient · tick_",
+             "note": "最新价、累计成交额、盘口与行情时间；IOPV 溢价时效待核，仅作参考，历史回放可无盘口。"},
         ],
         "broadTable": [
             {"label": "宽基成交额与指数", "code": "RQData get_price(1d) / index_components",
@@ -130,9 +133,9 @@ def source_descriptions(source_id: str) -> dict:
         return {}
     ddb = {
         "chart": [
-            {"label": "ETF 日收盘/成交额", "code": "mkt_fundd.CLOSE_PRICE / TURNOVER_VALUE",
-             "note": "DDB 日行情；成交额单位为元。"},
-            {"label": "上证综指", "code": "AIndexEODPrices.S_DQ_CLOSE", "note": "DDB 指数日线。"},
+            {"label": "ETF 与指数分钟 K 线", "code": "RQData LiveMarketDataClient · bar_ / get_price(1m)",
+             "note": "分钟行情来自 RQData，不随日频源切换。"},
+            {"label": "指数上一交易日收盘", "code": "RQData get_price(1d)", "note": "盘中缓存使用 RQData 昨收。"},
         ],
         "chartCum": [
             {"label": "分钟累计", "code": "RQData get_price(1m)（实时/历史分钟共用）",
@@ -149,8 +152,8 @@ def source_descriptions(source_id: str) -> dict:
         "chartBroad": [
             {"label": "ETF 份额与净值", "code": "fund_etf_nr.SHARES / NAV",
              "note": "DDB 份额表；需保持更新。"},
-            {"label": "折溢价", "code": "mkt_fundd.CLOSE_PRICE / fund_nav.NAV",
-             "note": "无需份额即可计算。"},
+            {"label": "折溢价", "code": "mkt_fundd.CLOSE_PRICE / (fund_etf_nr.NAV 或 fund_nav.NAV)",
+             "note": "优先份额表净值，缺失时按同代码、同归属日回退单位净值。"},
         ],
         "chartDAmt": [
             {"label": "历史与当日成交额", "code": "mkt_fundd.TURNOVER_VALUE",
@@ -165,12 +168,11 @@ def source_descriptions(source_id: str) -> dict:
              "note": "DDB 日成交额，单位元。"},
         ],
         "chartNf": [
-            {"label": "核心 ETF 日净申赎", "code": "fund_etf_nr.NET_INFLOW",
-             "note": "DDB 份额表；与 RQData 重叠期一致。"},
+            {"label": "核心 ETF 日净申赎", "code": "fund_etf_nr.SHARES / NAV / SPLIT_RATIO → fund_flows",
+             "note": "用共同公式及 SPLIT_RATIO 累乘因子计算，与 NET_INFLOW 对账；不可验证的折算拒绝构建。"},
         ],
         "etfTable": [
-            {"label": "核心 ETF 表", "code": "mkt_fundd / fund_etf_nr",
-             "note": "价格、成交额、涨跌幅与日度净申赎。"},
+            *common["etfTable"],
         ],
         "broadTable": [
             {"label": "宽基成交额与指数", "code": "mkt_fundd / AIndexEODPrices",
@@ -196,6 +198,12 @@ class RQDataAdapter:
         # The file-level/dynamic readiness check lives in web.py; collection
         # itself only needs the provider to be available.
         return SourceStatus(self.id, self.label, True)
+
+    def target_date(self, cutoff: str) -> str:
+        dates = self.api.get_trading_dates(before(cutoff, 40), cutoff)
+        if not len(dates):
+            raise ValueError("No trading date before daily cutoff")
+        return str(dates[-1])[:10]
 
     def collect_history(self, start: str, end: str, minute_days: int = 0):
         market = provider.collect(self.api, {
@@ -238,19 +246,33 @@ class DDBAdapter:
         basket = json.loads((ROOT / "config/basket.json").read_text(encoding="utf-8"))["symbols"]
         return [symbol.split(".")[0] for symbol in basket]
 
+    def target_date(self, cutoff: str) -> str:
+        # Observed index sessions avoid requesting Sunday/holiday fund data.
+        frame = self.query("select max(TRADE_DT) as maxd from "
+                           "loadTable('dfs://WIND_AIndexEODPrices','AIndexEODPrices') "
+                           "where S_INFO_WINDCODE='000001.SH' and TRADE_DT between "
+                           f"{dot(before(cutoff, 40))} : {dot(cutoff)}")
+        if not len(frame) or str(frame.iloc[0]["maxd"]) in {"NaT", "None", "nan"}:
+            raise ValueError("DDB index calendar unavailable")
+        return str(frame.iloc[0]["maxd"])[:10]
+
     def status(self, target: str) -> SourceStatus:
         core = self._core()
         try:
             frame = self.query(
                 "select TICKER_SYMBOL,max(TRADE_DATE) as maxd "
                 "from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
-                f"where TICKER_SYMBOL in {core!r} group by TICKER_SYMBOL")
+                f"where TICKER_SYMBOL in {core!r} and TRADE_DATE={dot(target)} "
+                "and SHARES>0 and NAV>0 group by TICKER_SYMBOL")
             per_symbol = {str(row["TICKER_SYMBOL"]): str(row["maxd"])[:10]
                           for _, row in frame.iterrows()} if len(frame) else {}
             market = self.query(
-                "select max(TRADE_DATE) as maxd from loadTable('dfs://hermes_etf_data','mkt_fundd') "
-                f"where TICKER_SYMBOL in {core!r}")
-            market_latest = str(market.iloc[0]["maxd"])[:10] if len(market) else None
+                "select TICKER_SYMBOL,max(TRADE_DATE) as maxd from loadTable('dfs://hermes_etf_data','mkt_fundd') "
+                f"where TICKER_SYMBOL in {core!r} and TRADE_DATE={dot(target)} "
+                "and CLOSE_PRICE>0 and TURNOVER_VALUE>=0 group by TICKER_SYMBOL")
+            market_dates = {str(row["TICKER_SYMBOL"]): str(row["maxd"])[:10]
+                            for row in market.to_dict("records")}
+            market_latest = min(market_dates.values()) if market_dates else None
         except Exception as error:
             return SourceStatus(self.id, self.label, False, reason=f"DDB 查询失败：{type(error).__name__}")
         missing = [symbol for symbol in core if symbol not in per_symbol]
@@ -264,10 +286,11 @@ class DDBAdapter:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
                                 reason=f"fund_etf_nr 有 {len(stale)} 只核心 ETF 未到 {target}")
-        if not market_latest or market_latest < target:
+        missing_market = [symbol for symbol in core if market_dates.get(symbol, "") < target]
+        if missing_market:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
-                                reason=f"mkt_fundd 最后日期 {market_latest or '无'}，目标 {target}")
+                                reason=f"mkt_fundd 有 {len(missing_market)} 只核心 ETF 缺少 {target} 有效行情")
         return SourceStatus(self.id, self.label, True, latest_market_date=market_latest,
                             latest_flow_date=latest)
 
@@ -287,7 +310,7 @@ class DDBAdapter:
             "from loadTable('dfs://hermes_etf_data','mkt_fundd') "
             "where TICKER_SYMBOL in {values} and TRADE_DATE between " + dot(start) + " : " + dot(end), bare)
         shares = self._query_batches(
-            "select TICKER_SYMBOL,TRADE_DATE,SHARES,NAV,SPLIT_RATIO "
+            "select TICKER_SYMBOL,TRADE_DATE,SHARES,NAV,SPLIT_RATIO,NET_INFLOW "
             "from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
             "where TICKER_SYMBOL in {values} and TRADE_DATE between " + dot(start) + " : " + dot(end), bare)
         index = self.query(
@@ -298,11 +321,15 @@ class DDBAdapter:
             for column in ("TRADE_DATE", "TRADE_DT"):
                 if column in frame.columns:
                     frame[column] = pd.to_datetime(frame[column]).dt.strftime("%Y-%m-%d")
+        for frame, keys in ((bars, ["TICKER_SYMBOL", "TRADE_DATE"]),
+                            (shares, ["TICKER_SYMBOL", "TRADE_DATE"]), (index, ["TRADE_DT"])):
+            if len(frame) and frame.duplicated(keys).any():
+                raise ValueError("Duplicate DDB daily rows")
         by_symbol = {symbol: symbol.split(".")[0] for symbol in symbols}
         full = {bare_value: symbol for symbol, bare_value in by_symbol.items()}
         daily, closes = [], {}
         core = set(self._core())
-        for _, row in bars.iterrows():
+        for row in bars.to_dict("records"):
             code = str(row["TICKER_SYMBOL"])
             symbol = full.get(code)
             if not symbol:
@@ -316,24 +343,73 @@ class DDBAdapter:
                 turnover = float(row["TURNOVER_VALUE"]) if pd.notna(row["TURNOVER_VALUE"]) else None
                 stamp = int(datetime.fromisoformat(day + "T15:00:00+08:00").timestamp() * 1000)
                 daily.append([symbol, stamp, close, turnover])
-        for _, row in index.iterrows():
+        for row in index.to_dict("records"):
             day = row["TRADE_DT"]
             close = float(row["S_DQ_CLOSE"]) if pd.notna(row["S_DQ_CLOSE"]) else None
             if close is not None:
                 daily.append(["000001.SH", int(datetime.fromisoformat(day + "T15:00:00+08:00").timestamp() * 1000), close, None])
-        fund_rows = {symbol: {"shares": [], "navs": [], "splits": []} for symbol in symbols}
-        for _, row in shares.iterrows():
+        fund_rows = {symbol: {"shares": [], "navs": [], "splits": [],
+                              "unverified_split_dates": [],
+                              "split_source": "DDB SPLIT_RATIO with NET_INFLOW reconciliation"} for symbol in symbols}
+        factors, factor_dates, expected_flows = {}, {}, {}
+        for row in shares.sort_values(["TICKER_SYMBOL", "TRADE_DATE"]).to_dict("records"):
             symbol = full.get(str(row["TICKER_SYMBOL"]))
             if not symbol:
                 continue
             day = row["TRADE_DATE"]
+            ratio = float(row["SPLIT_RATIO"]) if pd.notna(row["SPLIT_RATIO"]) else None
+            expected = provider.number(row["NET_INFLOW"])
+            if ratio is None and expected is None:
+                fund_rows[symbol]["unverified_split_dates"].append(day)
+            if ratio is not None and ratio <= 0:
+                raise ValueError(f"Invalid DDB split ratio: {symbol} {day}")
+            if ratio is not None and ratio != 1 and expected is None:
+                raise ValueError(f"DDB split requires NET_INFLOW reconciliation: {symbol} {day}")
+            factors[symbol] = factors.get(symbol, 1.0) * (ratio or 1.0)
+            factor_dates[symbol, day] = factors[symbol]
+            expected_flows[symbol, day] = expected
             if pd.notna(row["SHARES"]) and float(row["SHARES"]) > 0:
                 fund_rows[symbol]["shares"].append([day, float(row["SHARES"])])
             if pd.notna(row["NAV"]) and float(row["NAV"]) > 0:
-                fund_rows[symbol]["navs"].append([day, float(row["NAV"]), 1.0])
+                fund_rows[symbol]["navs"].append([day, float(row["NAV"]), factors[symbol]])
             if pd.notna(row["SPLIT_RATIO"]) and float(row["SPLIT_RATIO"]) > 0:
                 fund_rows[symbol]["splits"].append([day, float(row["SPLIT_RATIO"])])
         calendar = sorted(set(index["TRADE_DT"].tolist())) if len(index) else sorted(closes)
+        # Only query the fallback table for products with missing unit NAVs.
+        known_nav_dates = {symbol: {day for day, _, _ in fund_rows[symbol]["navs"]} for symbol in symbols}
+        missing_nav = {symbol for symbol in symbols
+                       if set(closes_day for closes_day, values in closes.items() if symbol in values)
+                       - known_nav_dates[symbol]}
+        if missing_nav:
+            ids = info.loc[info["TICKER_SYMBOL"].isin([s[:6] for s in missing_nav]), "SECURITY_ID"].tolist()
+            navs = self._query_batches(
+                "select SECURITY_ID,END_DATE,NAV from loadTable('dfs://hermes_etf_data','fund_nav') "
+                "where SECURITY_ID in {values} and END_DATE between " + dot(start) + " : " + dot(end), ids)
+            if len(navs):
+                if navs.duplicated(["SECURITY_ID", "END_DATE"]).any():
+                    raise ValueError("Duplicate DDB NAV rows")
+                navs = navs.merge(info, on="SECURITY_ID", validate="many_to_one")
+                for row in navs.to_dict("records"):
+                    symbol = full.get(str(row["TICKER_SYMBOL"]))
+                    day = str(row["END_DATE"])[:10]
+                    nav = provider.number(row["NAV"])
+                    if day not in known_nav_dates[symbol] and nav and nav > 0:
+                        factor = factor_dates.get((symbol, day))
+                        fund_rows[symbol]["navs"].append([day, nav, factor])
+                        known_nav_dates[symbol].add(day)
+        for fund in universe["funds"]:
+            symbol = fund["symbol"]
+            if symbol not in fund_rows:
+                continue
+            computed = fund_flows(fund, fund_rows[symbol], calendar)
+            for day, row in computed.items():
+                expected = expected_flows.get((symbol, day))
+                actual = row["flow"]
+                if expected is not None and finite(actual) and abs(actual * 1e8 - expected) > max(.01, abs(expected) * 1e-9):
+                    raise ValueError(f"DDB NET_INFLOW mismatch: {symbol} {day}")
+            for day, ratio in fund_rows[symbol]["splits"]:
+                if ratio != 1 and (day not in computed or computed[day]["flow"] is None):
+                    raise ValueError(f"DDB split cannot be verified: {symbol} {day}")
         market = {"calendar": calendar, "daily": daily, "minutes": []}
         return market, {"funds": fund_rows}, closes
 

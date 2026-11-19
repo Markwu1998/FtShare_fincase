@@ -26,6 +26,8 @@ export function createRadar(root) {
         <span class="radar-voice-status" id="burstVoiceStatus">检测语音引擎…</span>
       </div>
       <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交额窗口</th><th>同窗额比 20／60日</th><th>全天额比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
+      <p id="burstCandidates" role="status">Tick 分钟内候选：等待行情；不触发正式告警。</p>
+      <details><summary>Tick 与供应商 bar 对账</summary><p id="tickComparison">等待对账</p></details>
       <div id="burstDetail" class="chart" style="height:250px" hidden aria-label="所选事件的成交量与同窗基准"></div>
     </div>
     <div class="radar-funds-heading"><div><h3>单只 ETF · 日度资金信号</h3><p id="radarFundDates">等待共享快照</p></div><div class="radar-fund-counts" id="radarFundCounts"></div></div><div class="radar-funds" id="radarFunds"></div><button class="radar-expand" id="radarExpand" type="button">展开全部20只 ETF</button>`;
@@ -45,8 +47,23 @@ export function createRadar(root) {
   paintVoice();
   function renderBurst() {
     if (!burst) return;
+    if(burst.schema_version!==2||burst.metric!=='turnover'||burst.unit!=='CNY'){
+      $('burstEvents').replaceChildren();$('burstDetail').hidden=true;
+      $('burstStatus').textContent='旧归档指标或单位不兼容，请重新生成成交额回放';return;
+    }
     const cutoff = burst.replay ? ($('burstTime').value || '14:57') : '15:00';
     const knownNames = names();
+    const tickReplay=burst.replay&&burst.feed==='tick-replay';
+    const candidates=tickReplay?(burst.candidate_history||[]).filter(c=>Date.parse(c.as_of)<=Date.parse(burst.date+'T'+cutoff+':00+08:00')).slice(-10):burst.replay?[]:burst.candidates||[];
+    $('burstCandidates').textContent=candidates.length?(tickReplay?'Tick 历史候选（仅展示、不播报）：':'Tick 分钟内候选（未确认、不播报）：')+candidates.map(c=>
+      (knownNames.get(c.symbol)||c.symbol)+' · '+c.signal.window+'分钟 · '+levels[c.signal.level]+'候选 · '+fmt(c.signal.amount/1e8,2)+'亿元 · 行情 '+new Date(c.as_of).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})).join('；')
+      :tickReplay?'该回放时点暂无 Tick 候选。':burst.replay?'历史分钟回放不还原分钟内 Tick 候选。':'Tick 分钟内候选：暂无；候选不计入正式事件，不触发播报。';
+    const monitor=burst.tick_monitor;
+    $('tickComparison').textContent=monitor?
+      '正式分钟来源：'+(monitor.minute_driver==='tick'?'Tick 本地聚合':'供应商 bar（Tick 并行验证中）')+
+      '；已对账 '+monitor.compared+' 个分钟格，金额不一致 '+monitor.mismatched+' 个，共同完成分钟的事件差异 '+(monitor.event_mismatches??0)+' 个，待补 '+monitor.unrecovered+' 个，已由 bar 补齐 '+monitor.recovered+' 个。'+
+      (monitor.differences||[]).slice(-5).map(r=>r.symbol+' '+r.slot+' 差额 '+fmt(r.difference,2)+'元').join('；')
+      :'该归档没有 Tick 对账信息。';
     const rows = burst.events.filter(event => event.first <= cutoff).slice().sort((a,b) => b.first.localeCompare(a.first));
     details = new Map();
     const pair = (values, mode) => values.map(v => v == null ? '—' : mode === 'pct' ? fmt(v * 100, 1) + '%' : fmt(v, 1) + '×').join(' / ');
@@ -66,7 +83,7 @@ export function createRadar(root) {
       details.set(event.id, signal);
       return `<tr><td>${esc(knownNames.get(event.symbol) || event.symbol)} <small>${esc(event.symbol)}</small></td>
         <td>${esc(event.first)} / ${esc(last)}</td><td>${levels[signal.level]}${event.recovered && !burst.replay ? ' · 补数' : ''}</td>
-        <td><button type="button" data-burst-id="${esc(event.id)}" title="窗口成交额 ${fmt((signal.amount ?? signal.volume) / 1e8, 2)} 亿元">${esc(signal.start)}–${esc(signal.end)}</button></td>
+        <td><button type="button" data-burst-id="${esc(event.id)}" title="窗口成交额 ${fmt(signal.amount / 1e8, 2)} 亿元">${esc(signal.start)}–${esc(signal.end)}</button></td>
         <td>${pair(signal.ratios)}</td><td>${pair(signal.daily, 'pct')}</td><td>${esc(evidence.join(' · ') || '—')}</td></tr>`;
     }).join('');
     const now = new Date(Date.now() + 8 * 3600000).toISOString().slice(11,16);
@@ -206,6 +223,7 @@ export function createRadar(root) {
     eventStream.addEventListener('burst', message => {
       if (revision !== choice) return;
       const value = JSON.parse(message.data);
+      if(value.schema_version!==2||value.metric!=='turnover'||value.unit!=='CNY')return;
       const known = new Map((burst?.events || []).map(event => [event.id, event.level]));
       const fresh = value.events.filter(event => !event.recovered && event.detected_at &&
           Date.now() - Date.parse(event.detected_at) < 15000 && event.level >= 1 && event.level > (known.get(event.id) || 0));
@@ -289,5 +307,23 @@ export function createRadar(root) {
   $('radarTime').addEventListener('input', () => { at = Number($('radarTime').value); render(); });
   $('radarFollow').addEventListener('click', () => { at = null; render(); });
   $('radarExpand').addEventListener('click', () => { expanded = !expanded; render(); });
-  return { render };
+  function updateQuotes(value){
+    if(at!==null||value?.replay)return;
+    if(Number.isFinite(value?.index_quote?.price)&&value.pre_close>0){
+      const pct=(value.index_quote.price/value.pre_close-1)*100;
+      $('radarIndex').textContent=signed(pct)+'%';
+      $('radarIndex').className=pct>0?'positive':pct<0?'negative':'';
+    }
+    const quotes=new Map((value?.table||[]).map(row=>[row.symbol,row]));
+    root.querySelectorAll('.radar-fund').forEach(card=>{
+      const symbol=card.querySelector('.radar-fund-code')?.textContent.split(' · ')[0],quote=quotes.get(symbol);
+      if(!quote)return;
+      const cells=card.querySelectorAll('.radar-fund-values b');
+      cells[0].textContent=fmt(quote.price,4);
+      cells[1].textContent=signed(quote.pct)+(quote.pct==null?'':'%');
+      cells[1].className=quote.pct>0?'positive':quote.pct<0?'negative':'';
+      cells[2].innerHTML=fmt(quote.amount,2)+'<em>亿</em>';
+    });
+  }
+  return { render, updateQuotes };
 }

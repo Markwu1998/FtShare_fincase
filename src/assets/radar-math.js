@@ -6,7 +6,7 @@ export function burstAnnouncement(event) {
   // Speak the code character by character. A raw "510330" is read by many
   // TTS engines as the number 510,330; Chinese digits force a string reading.
   const spoken = code.replace(/[0-9]/g, digit => '零一二三四五六七八九'[digit]);
-  const raw = signal.amount ?? signal.volume;
+  const raw = signal.amount;
   const amount = Number.isFinite(raw) && raw > 0 ? (raw / 1e8).toFixed(2) + '亿元' : '成交额待齐';
   const rawTime = String(signal.end || event?.last || '');
   const time = rawTime ? rawTime.replace(':', '点') + '分' : '时间待齐';

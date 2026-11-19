@@ -3,7 +3,7 @@
 | 图表 | RQData 方法与字段 |
 |---|---|
 | 分时成交额、指数走势、累计成交、20/60 日雷达 | 盘中：`LiveMarketDataClient` 的 `bar_`/`tick_` 推送；启动或断线时用 `rqdatac.get_price(frequency="1m", adjust_type="none")` 补齐；历史样本用 `get_price("1m")`，统一 240 点时间轴 |
-| ETF 表格、盘中总览 | `rqdatac.current_snapshot` 的 `last` 和 `total_turnover`，涨跌幅按上一交易日日线收盘计算 |
+| ETF 表格、盘中总览 | 实时采集使用 `LiveMarketDataClient` 的 `tick_`：`last`、`total_turnover`、`bid`、`ask`、`iopv`、`datetime`；涨跌幅按上一交易日日线收盘计算。经 `/api/live/stream` 约每秒合并推送，断开时每 2 秒读缓存。普通历史回放可无盘口字段 |
 | ETF 历史成交额、指数日线和各标的前收 | `rqdatac.get_price(frequency="1d", adjust_type="none")`，取 `total_turnover`、`close` |
 | 核心与宽基净申赎、分类表、放量与常态日划分 | `rqdatac_fund.fund.get_daily_units`、`fund.get_nav`、`fund.get_split`，取份额、单位净值与折算事件 |
 | 宽基日末规模 | `fund.get_daily_units` 的同日份额 × `fund.get_nav` 的原始单位净值，换算为亿元 |

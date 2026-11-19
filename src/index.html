@@ -77,7 +77,8 @@
       <span class="tag" id="tagDate">--</span>
       <span class="tag" id="tagUpdate">未加载</span>
       <span class="tag" id="tagCountdown" style="display:none"></span>
-      <span class="tag">云端统一更新 · 每分钟读取缓存</span>
+      <span class="tag">Tick 行情约1秒更新 · 分钟信号独立确认</span>
+      <span class="tag" id="tagIndexQuote">上证综指等待 Tick</span>
     </div>
     <section class="chart-wrap"><div id="chart"></div>
       <details class="chart-source" data-source-for="chart">
@@ -127,7 +128,7 @@
       <div class="tscroll">
         <table>
           <thead><tr>
-            <th>代码</th><th>名称</th><th class="num">当日成交额(亿)</th><th class="num">占比</th><th class="num">涨跌幅</th>
+            <th>代码</th><th>名称</th><th class="num">最新价</th><th class="num">买一 / 卖一</th><th class="num">溢价(bp，IOPV时效待核)</th><th class="num">当日成交额(亿)</th><th class="num">占比</th><th class="num">涨跌幅</th><th>行情时间</th>
           </tr></thead>
           <tbody id="etfTable"></tbody>
         </table>

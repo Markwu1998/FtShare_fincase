@@ -30,5 +30,6 @@ export const FLOW_ISSUE_LABELS={
   share_missing:'当期份额记录未取得',
   previous_share_missing:'前一期份额记录未取得',
   share_change_review:'份额与净值异常变动需核对',
+  split_evidence_missing:'折算证据与独立净申赎对账缺失',
   source_missing:'日度记录未取得'
 };

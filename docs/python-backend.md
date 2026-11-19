@@ -15,7 +15,7 @@ $env:PORT = '8080'
 & .\scripts\python-backend.ps1 web
 ```
 
-在另一个终端启动 `& .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')`。Python 盘中采集使用 RQData `LiveMarketDataClient` 订阅分钟线和 tick，一个进程向现有看板和逐只 ETF 事件雷达发布结果。浏览器继续通过 `/api/live` 读取共享缓存。开市前启动可预载基准；**11:30–13:00 保持同一订阅不断流**，因此 13:01 的第一根下午分钟线不需要额外回补。开市中启动、进程重启或上游断流时，用 RQData 分钟线补齐已结束分钟。
+在另一个终端启动 `& .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')`。Python 盘中采集使用 RQData `LiveMarketDataClient` 订阅分钟线和 tick，一个进程向现有看板和逐只 ETF 事件雷达发布结果。浏览器优先通过 `/api/live/stream` 接收约每秒合并的 Tick 更新，连接失败时每 2 秒读取 `/api/live` 缓存；日频检查仍独立进行。最新价、成交额、盘口和逐只时间随 Tick 更新，分钟图与放量确认仅使用完整 bar；首个完整分钟之前也可展示已经收到的报价。详见 [Tick 链路与验收](tick-live-20261119.md)。开市前启动可预载基准；**11:30–13:00 保持同一订阅不断流**。开市中启动、进程重启或上游断流时，用 RQData 分钟线补齐已结束分钟。
 
 Linux 或已配置 SDK 凭据的 Python 环境可直接运行以下命令。环境变量只在相应组件的服务配置中设置，网页应使用只读的快照路径。
 
@@ -66,13 +66,14 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 
 ### 定时任务
 
-当前由 DSH 定时任务驱动，详见 [运维手册](operations.md)：
+以下为目标部署机的建议时间表，需自行配置操作系统或外部调度器；代码合并和普通启动不创建任务，亦不代表本机已配置。详见 [运维手册](operations.md#26-定时任务)：
 
 | 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频更新 08:20` | 周一至周五 08:20 | `history --recent` |
+| `ETF 日频与拥挤度 09:20` | 周一至周五 09:20 | `scripts/update-daily-all.ps1` |
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时后台启动网页/采集器 |
-| `ETF 日频补采 12:30` | 周一至周五 12:30 | `history --recent`，补晚披露 |
+| `ETF 日频补采 12:30` | 周一至周五 12:30 | `scripts/update-sources.ps1 -SkipCrowding`，补晚披露 |
+| `ETF 周六公募拥挤度` | 周六 09:00 | `crowding --crowding-module=funds` |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，补全到 15:00 |
 
 采集器为常驻进程：09:15 自动切换新交易日，15:02 后空闲；每天写 `data/private/collector.heartbeat`，`start-collector.cmd` 依据心跳避免重复启动。日常状态用 `status.cmd` 查看。
@@ -89,9 +90,11 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 & .\scripts\python-backend.ps1 -Mode burst-replay -Arguments @('--start=2026-11-12','--end=2026-11-13')
 ```
 
-Linux 对应命令为 `python -m etf_backend.collect burst-replay --end=2026-11-13`。已有 RQData 成交量导出时，可以用 `--burst-input` 离线回放，输入 JSON 包含 `1m` 和 `1d` 两组 `[symbol, date, slot, volume]`。采集和网页共用 `ETF_BURST_DIR`。默认参数在 `config/etf-burst.json`，自定义文件通过 `ETF_BURST_CONFIG` 或 `--burst-config` 指定。实时和历史快照分目录保存，历史日期和事件接口为 `/api/etf-burst/dates` 和 `/api/etf-burst?date=YYYY-MM-DD`。实时接口为 `/api/etf-burst/stream`，代理须关闭 SSE 响应缓冲。详细口径见 [盘中放量研究](etf-intraday-burst-research.md)。
+Linux 对应命令为 `python -m etf_backend.collect burst-replay --end=2026-11-13`。已有 RQData 成交额导出时，可以用 `--burst-input` 离线回放。输入必须包含 `schema_version:2`、`metric:"turnover"`、`unit:"CNY"`，以及 `1m` 和 `1d` 两组 `[symbol, date, slot, amount]`；`amount` 为元，分钟与日线必须同口径。旧成交量导出和无版本归档拒绝按成交额使用，须从已确认的成交额原始数据重新生成，不能仅改旧文件标签。采集和网页共用 `ETF_BURST_DIR`。默认参数在 `config/etf-burst.json`，自定义文件通过 `ETF_BURST_CONFIG` 或 `--burst-config` 指定。实时和历史快照分目录保存，历史日期和事件接口为 `/api/etf-burst/dates` 和 `/api/etf-burst?date=YYYY-MM-DD`。实时事件接口为 `/api/etf-burst/stream`；行情流 `/api/live/stream` 与其独立，代理均须关闭 SSE 响应缓冲。详细口径见 [盘中放量研究](etf-intraday-burst-research.md)。
 
 ## API 与部署
+
+盘中异动还支持 Tick 本地聚合、分钟内候选和供应商 bar 并行验证。默认 `config/etf-burst.json` 的 `minute_driver="provider"` 保留原正式确认来源，独立验证后可配置为 `tick`。新增 Tick 导出回放及归档隔离方式见 [Tick 驱动异动监控](tick-driver.md)。
 
 现有网页使用 `/api/health`、`/api/board`、`/api/history`、`/api/live` 和 `/api/cumulative`，另含 `/api/crowding*`、`/api/etf-burst*`。浏览器继续执行分钟回放和交互绘图。API 和采集器都能在无 Node.js 环境运行。部署与日常运维见 [运维手册](operations.md)。
 
@@ -118,7 +121,7 @@ Linux 使用下表对应命令。可加 `--start=YYYY-MM-DD` 指定回补起点�
 
 `/api/crowding/industry`、`/api/crowding/funds`、`/api/crowding/financing` 各自读取独立快照。采集异常时保留上次归档。可用 `--crowding-module=industry|funds|financing` 单独补数。
 
-- 指数行业用周末 RQData 申万一级分类。周市值用周末成分，周成交额逐日按有效成分汇总。固定申万 2014 版待 Wind API 核验，当前展示每期第一行业及峰值。
+- 指数行业按交易日日度成分、市值和成交额汇总，RQData 申万一级分类在每个 ISO 周首次计算时缓存复用。周内行业变更可能存在延迟；固定申万 2014 版待 Wind API 核验，当前展示每期第一行业及峰值。
 - 公募按 RQData 聚源 1101、1201 分类，合并有效多份额关系，取每只基金首次披露的前十大股中的 A 股。无法归类的持仓市值计入「未分类」。报告期用于横轴，公告日及基金覆盖独立披露。
 - 融资使用沪深两市融资余额，市值为沪深 A 股本身的市值。名义 GDP 与 M2 按公布日期对齐。住户存款预留 Wind API 数据位，接入后应使用人民币余额及发布日期。
 

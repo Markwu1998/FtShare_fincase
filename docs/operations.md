@@ -4,7 +4,7 @@
 本手册覆盖：首次安装、日常运行、定时任务、数据目录、健康检查、故障处理、备份与升级。
 
 > 所有命令都在项目根目录执行：
-> `C:\Users\Lenovo\PycharmProjects\FtShare_fincase`
+> 例如 `D:\ETFMonitor\FtShare_fincase`；请按目标机实际目录调整。
 
 ---
 
@@ -23,7 +23,7 @@
 **关键事实：**
 
 - 网页**只读文件**，快照更新后按 `mtime` 自动热加载，**不需要重启**。
-- 盘中缓存由采集器写，网页不直接访问 RQData。
+- 盘中缓存由采集器写，网页不直接访问 RQData。Tick 报价经 `/api/live/stream` 约每秒合并推送，失败时每 2 秒读缓存；分钟图与放量确认仍按完整 bar 更新。
 - 日频数据存在「披露延迟」：`09:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
 - 日切：`/api/live` 只返回**当日**（Asia/Shanghai）缓存；盘前或跨日后返回 503，页面自动刷新后盘中区域为空，09:30 新缓存到达后恢复。
 - 页头新鲜度：显示最新行情分钟、本地时间和延时；盘中延时 >90 秒变黄，>180 秒变红告警；午休/收盘显示中性的“午间休市/已收盘”。
@@ -94,9 +94,9 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 
 ### 2.6 定时任务
 
-日频更新与开盘前启动已注册到 **DSH 定时任务**（不在 Windows 任务计划里）：
+以下为目标部署机的建议调度配置。克隆、合并代码或普通启动不会注册任务；本文不表示当前电脑已注册 DSH 或 Windows 任务。Windows Server、Linux 或腾讯云 CVM 的调度方式见 [部署说明](python-backend.md#后续指标与计划任务)。
 
-| DSH 任务 | 触发（Asia/Shanghai） | 动作 |
+| 建议任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
 | `ETF 日频与拥挤度 09:20` | 周一至周五 09:20 | `update-daily-all.ps1`：RQData ETF + 日度拥挤度 + 融资 + 行业 |
 | `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
@@ -104,13 +104,13 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页与采集器，输出状态 |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，用当日 1m 线补全到 15:00 |
 
-08:20 旧任务已暂停，日频 ETF 合并到 09:20 总更新；12:30 仍保留 ETF/DDB 晚披露补采。
+建议把日频 ETF 与日度拥挤度合并到 09:20 总更新，12:30 补采晚披露数据。已有旧任务时应在目标机核对并去重。
 
 说明：
 
-- DSH 任务以「新会话 + 提示词」方式执行，需要 **DSH 运行时处于运行状态**；停机期间错过的触发只会补发最近一次。
-- 网页与采集器也可以改用 Windows 任务计划（可选）：双击 `setup-tasks.cmd`，注册 4 个 Windows 任务。
-- **两种方式二选一**，不要同时启用，避免网页/采集器被重复启动。
+- 推荐目标服务器使用操作系统调度器直接调用脚本；DSH 等外部调度器可选，任务状态需在实际使用的调度器中检查。
+- `setup-tasks.cmd` 是可选的 Windows 安装入口，只有显式运行才注册 4 个任务：08:20 与 12:30 执行 `update-daily.cmd`，登录时启动网页/采集器。它不包含上表的拥挤度、公募及收盘补全任务，也不会配置 09:20 总更新；完整方案须在目标机单独配置。
+- 每个采集模块仅保留一个调度入口，避免重复启动或并发写入同一归档。
 
 > 若 Windows 任务注册失败（受限环境会返回「拒绝访问」），可在「任务计划程序」手工创建：操作 `cmd.exe`，参数 `/c "完整路径\xxx.cmd"`，起始于项目根目录。
 
@@ -120,7 +120,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 .\status.cmd
 ```
 
-预期：4 个任务状态正常、`8080` 返回 `RQData / live`、快照日期正确、缓存有当日分钟。
+预期：`8080` 返回 `RQData / live`、快照日期正确、交易时段缓存有当日分钟。只有在目标机主动安装任务后才检查相应任务状态；本地未注册任务属正常情况。
 
 ---
 
@@ -274,7 +274,7 @@ DDB 环境变量见 `.env.example`：`DDB_HOST`、`DDB_PORT`、`DDB_USER`、`DDB
 ```
 
 输出包含：Windows 任务（可选）状态、8080/8081 接口、快照日期、缓存时点、采集器心跳、拥挤度行数、数据目录大小。
-DSH 定时任务不在此脚本里，需在 DSH 的调度器或本会话的定时任务列表中查看。
+若目标机使用外部调度器，其任务不在此脚本里，需在实际调度器中查看。
 
 ### 5.2 接口判定
 
@@ -282,7 +282,7 @@ DSH 定时任务不在此脚本里，需在 DSH 的调度器或本会话的定�
 |---|---|---|
 | `/api/health` | `mode=live`、`provider=RQData` | `demo` = 用错进程或 `.env` |
 | `/api/board` | `latest_flow_date` 为上一交易日 | 503 = 快照缺失/损坏 |
-| `/api/live` | 200，`last_complete_minute` 在推进 | 503 = 采集器未运行或已收盘 |
+| `/api/live` | 当日有缓存时 200，Tick 时间或 `last_complete_minute` 在推进 | 503 = 无有效当日缓存；首个完整分钟前该分钟字段可为空，收盘后当日缓存仍可读取 |
 | `/api/crowding` | 200，`rows` 非空 | 503 = 尚未采集 |
 | `/api/etf-burst/dates` | 200，`dates` 数组 | 404 = 雷达未启用 |
 
@@ -306,7 +306,7 @@ DSH 定时任务不在此脚本里，需在 DSH 的调度器或本会话的定�
 | `.env` 修改不生效 | ① shell 已有同名变量（脚本不覆盖）② 非 UTF-8 保存 | `Remove-Item Env:变量名`；另存为 UTF-8 |
 | `ModuleNotFoundError: rqdatac_fund` | 解释器不是 rqsdk | 检查 `.env` 的 `RQDATA_PYTHON` |
 | `history ... (ValueError)` | 覆盖检查不通过（区间太短/披露未到） | 等 12:30 再跑；或加长 `flow_start` |
-| `/api/live` 503 | 采集器未启动 / 非交易时段 / 尚未 09:30 | 启动采集器；收盘后属正常 |
+| `/api/live` 503 | 无有效当日缓存、跨日或回放未授权 | 启动采集器并检查缓存日期；收盘本身不强制返回 503 |
 | 雷达无「单只 ETF 放量」 | 非交易时段 / 当日无事件 / 雷达未启用 | 检查 `ENABLE_RADAR=1`；盘中再看 |
 | 采集器日志 `outside_trading_session` | 非交易时段 | 正常，等开盘 |
 | 重复运行 `start-collector.cmd` | 心跳未过期（5 分钟内） | 脚本直接退出，属正常保护 |
@@ -342,7 +342,7 @@ Copy-Item .local\rqdata-market.json "D:\ftshare-backup\rqdata-market-$stamp.json
 1. 安装 conda 环境与 `requirements-python.txt`；
 2. 配置 `RQDATAC2_CONF`（RQData 凭据）；
 3. 复制 `data/private`、`.env`、`.local/rqdata-market.json`；
-4. 注册计划任务（`setup-tasks.cmd`）；
+4. 如需定时采集，在目标机按 2.6 节配置调度；手动使用时跳过此步；
 5. `status.cmd` 验证。
 
 ---
@@ -424,5 +424,5 @@ Unregister-ScheduledTask -TaskName FtShare-UpdateDaily -Confirm:$false
 | 端口统一 8080 | README、文档、启动脚本、`.env.example` 一致 |
 | `.env` UTF-8 | 启动脚本按 UTF-8 读取，中文注释不再吞行 |
 | 运维脚本 | `start-web.cmd`、`start-collector.cmd`、`update-daily.cmd`、`setup-tasks.cmd`、`status.cmd` |
-| DSH 定时任务 | 09:20 总更新、12:30 补采、08:25 开盘前启动 |
+| 调度配置示例 | 09:20 总更新、12:30 补采、08:25 开盘前启动；需在目标机主动配置 |
 | 采集器心跳 | `data/private/collector.heartbeat`，`start-collector.cmd` 据此防止重复启动 |

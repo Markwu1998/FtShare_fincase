@@ -36,6 +36,9 @@
 | [上游模块迁移对照](market-data-provider-audit.md) | FtShare → RQData 逐接口对照与权限记录 |
 | [自动刷新验收](auto-refresh-acceptance-20261112.md) | 历史验收记录 |
 | [发布验证](verification.md) | 上线检查项 |
+| [2026-11-19 合并审查](merge-review-20261119.md) | dev_ebscn 合并、代码与文档差异、计算风险及性能建议 |
+| [Tick 行情改造与验收](tick-live-20261119.md) | Tick/SSE/UI 链路、计算修复、离线和历史回放证据及实盘边界 |
+| [Tick 驱动异动监控](tick-driver.md) | 本地聚合、分钟内候选、原规则保护、双链路对账与 Tick 回放 |
 
 ## 遗留：Node / Cloudflare / macOS
 

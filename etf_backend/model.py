@@ -89,6 +89,8 @@ def fund_flows(fund, records, calendar):
         if rq_split and ratio == 1:
             ratio = candidate
         issues = []
+        if day in records.get("unverified_split_dates", []):
+            issues.append("split_evidence_missing")
         if share is None:
             issues.append("share_missing")
         if prior is None:
@@ -114,7 +116,7 @@ def fund_flows(fund, records, calendar):
         if ratio != 1:
             row["split_ratio"] = ratio
         if rq_split:
-            row["split_source"] = "RQData fund.get_split and NAV factor"
+            row["split_source"] = records.get("split_source", "RQData fund.get_split and NAV factor")
         if nav_meta.get("source"):
             row["nav_source"] = nav_meta["source"]
         result[day] = row
