@@ -70,7 +70,7 @@ def fund_flows(fund, records, calendar):
             continue
         share, prior = shares.get(day), shares.get(previous)
         nav, factor, nav_meta = navs.get(day, (None, None, {}))
-        prior_nav, prior_factor, _ = navs.get(previous, (None, None, {}))
+        prior_nav, _, _ = navs.get(previous, (None, None, {}))
         baseline = evidence.get("listing_baseline") or {}
         used = prior is None and fund["symbol"].endswith(".SH") and fund["listed_date"] == day and (
             baseline.get("date") == previous and baseline.get("subscription_start_date", "") >= day
@@ -80,14 +80,18 @@ def fund_flows(fund, records, calendar):
             prior = float(baseline["fund_share"])
         event = verified.get(day, {})
         ratio = float(event.get("ratio", 1))
-        factor_ratio = float(factor) / float(prior_factor) if factor and prior_factor else 0
-        tolerance = 5e-6 if (event.get("source") or {}).get("verified_official_event") is True else 1e-8
-        if not ratio or abs(factor_ratio / ratio - 1) >= tolerance:
-            ratio = 1
         candidate = reported.get(day)
-        rq_split = candidate and candidate > 0 and abs(factor_ratio / candidate - 1) < 5e-4
-        if rq_split and ratio == 1:
-            ratio = candidate
+        # DDB supplies SPLIT_RATIO on the event row, but its NAV rows do not
+        # carry a usable adjustment factor. Validate the event against the
+        # observed share change instead of the NAV factor.
+        raw_share_ratio = share / prior if share is not None and prior else None
+        candidate_ok = (candidate and candidate > 0 and raw_share_ratio is not None
+                        and 0.75 <= raw_share_ratio / candidate <= 1.33)
+        if candidate_ok and ratio == 1:
+            ratio = float(candidate)
+            split_source = "source fund split"
+        else:
+            split_source = None
         issues = []
         if share is None:
             issues.append("share_missing")
@@ -100,7 +104,10 @@ def fund_flows(fund, records, calendar):
         if not issues:
             share_ratio = share / (prior * ratio) if prior else 1
             nav_ratio = nav / (prior_nav / ratio) if prior_nav else None
-            if (share_ratio > 1.5 or share_ratio < .67) and nav_ratio and abs(share_ratio * nav_ratio - 1) < .08:
+            # This guard is for an *unrecognized* split. Once the split ratio
+            # is known, a large share/nav product is expected and must not
+            # invalidate the flow (DDB carries SPLIT_RATIO on the event date).
+            if ratio == 1 and (share_ratio > 1.5 or share_ratio < .67) and nav_ratio and abs(share_ratio * nav_ratio - 1) < .08:
                 issues.append("share_change_review")
             else:
                 base = fixed(prior, 8) * fixed(ratio, 12) // 10**12
@@ -113,8 +120,8 @@ def fund_flows(fund, records, calendar):
             row["baseline_source"] = "verified_prelisting_shares"
         if ratio != 1:
             row["split_ratio"] = ratio
-        if rq_split:
-            row["split_source"] = "RQData fund.get_split and NAV factor"
+        if split_source:
+            row["split_source"] = split_source
         if nav_meta.get("source"):
             row["nav_source"] = nav_meta["source"]
         result[day] = row

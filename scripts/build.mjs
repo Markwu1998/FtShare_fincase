@@ -14,7 +14,7 @@ if (!['demo', 'live'].includes(mode)) throw new Error('DATA_MODE must be demo or
 const file = mode === 'demo' ? resolve(root, 'data/demo-seed.json') : resolve(root, process.env.FTSHARE_SEED_FILE || 'data/private/seed.json');
 let seed;
 try { seed = validateSeed(JSON.parse(await readFile(file, 'utf8')), mode); }
-catch (error) { throw new Error('Cannot build ' + mode + ' data. See docs/data.md. ' + error.message); }
+catch (error) { throw new Error('Cannot build ' + mode + ' data. See docs/reference/data-contract.md. ' + error.message); }
 const assets = {};
 for (const [path, type] of [['index.html','text/html'],['style.css','text/css'],['echarts.min.js','text/javascript'],['assets/flow-math.js','text/javascript'],['assets/data-source.js','text/javascript'],['assets/radar-math.js','text/javascript'],['assets/radar.js','text/javascript'],['assets/dashboard.js','text/javascript'],['assets/presentation.js','text/javascript'],['assets/brush.js','text/javascript'],['assets/ftai-mark.svg','image/svg+xml']]) {
   let body = await readFile(resolve(root, 'src', path), 'utf8');

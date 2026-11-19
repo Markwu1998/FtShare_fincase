@@ -1,57 +1,67 @@
 # 文档目录
 
-主运行方式：**RQData + Python 后端**。带「遗留」标记的文档仅用于 Node/Cloudflare 回退或历史对照。
+> 状态：现行 · 最后核对：2026-11-19
 
-## 当前：运行与运维
+主运行方式：**RQData + Python 后端**。带「历史」标记的文档位于 `archive/`，仅用于回退或追溯。
 
-| 文档 | 内容 |
-|---|---|
-| [运行与运维手册](operations.md) | 安装、日常运行、定时任务、数据目录、健康检查、故障处理、备份与升级 |
-| [Python 后端](python-backend.md) | 采集器/网页启动、增量更新、收盘补全、回放、部署 |
-| [部署方式](deployment.md) | Windows/Linux/腾讯云入口，Node 与 macOS 回退指引 |
-
-## 当前：数据与图表
+## 先读这三篇
 
 | 文档 | 内容 |
 |---|---|
-| [数据与计算](data.md) | RQData 接入、净申赎口径、快照结构、增量更新与容量 |
-| [RQData / DDB 日频对照](data-sources-rqdata-ddb.md) | 两个日频源的接口映射、完整性、一致性与切换建议 |
-| [日频数据源切换设计](data-source-switching-design.md) | 双源架构、API、一键切换语义与 UI 效果 |
-| [图表接口](chart-interfaces.md) | 每张图对应的 RQData 方法与字段 |
-| [雷达规则](radar-preview.md) | 20/60 日双基准、5 分钟窗口、状态判定 |
-| [雷达窗口回放](radar-window-review.md) | 离线回放与诊断 |
-| [盘中放量研究](etf-intraday-burst-research.md) | 逐 ETF 集中交易事件的规则与样本 |
+| [项目定位](overview/product.md) | 两个观测台、功能地图、运行边界 |
+| [系统架构](overview/architecture.md) | 进程、数据流、模块边界、关键决策 |
+| [快速开始](getting-started/quickstart.md) | 演示模式 5 分钟跑通 |
 
-## 当前：市场拥挤度
+## 入门与配置
 
 | 文档 | 内容 |
 |---|---|
-| [Python 后端 · 拥挤度](python-backend.md#市场拥挤度观测台) | `/crowding` 页面、四个模块、定时采集建议 |
-| [图表接口 · 资金全景](chart-interfaces.md#日度资金全景) | 规模/折溢价视图口径 |
+| [快速开始](getting-started/quickstart.md) | 演示模式启动 |
+| [实盘数据接入](getting-started/live-setup.md) | RQData 凭据、首次历史、网页与采集器 |
+| [配置参考](getting-started/configuration.md) | `.env` 与 `config/*.json` |
 
-## 迁移与验收
-
-| 文档 | 内容 |
-|---|---|
-| [上游模块迁移对照](market-data-provider-audit.md) | FtShare → RQData 逐接口对照与权限记录 |
-| [自动刷新验收](auto-refresh-acceptance-20261112.md) | 历史验收记录 |
-| [发布验证](verification.md) | 上线检查项 |
-
-## 遗留：Node / Cloudflare / macOS
+## 运行与运维
 
 | 文档 | 内容 |
 |---|---|
-| [Node 启动](rqdata-market.md) | 旧 Node 采集与只读网页，回退用 |
-| [Cloudflare Pages](cloudflare-pages.md) | Pages 只读部署（遗留） |
-| [云端定时更新](cloud-scheduled-update.md) | 采集 Worker + KV + 私有归档（遗留） |
-| [macOS](macmini.md) | LaunchAgents 管理（遗留） |
+| [部署](operations/deployment.md) | Windows/Linux/CVM/Docker，网络与安全入口 |
+| [运维手册](operations/runbook.md) | 首次安装、日常运行、健康检查、故障处理 |
+| [数据管线](operations/data-pipeline.md) | 增量更新、收盘补全、回放、定时任务 |
+| [备份、恢复与升级](operations/backup-and-upgrade.md) | 备份、迁移、升级回滚 |
+| [网络与主机配置](operations/network-security.md) | HTTPS、反向代理、暴露面 |
 
-## 发布与安全
+## 数据与指标
 
 | 文档 | 内容 |
 |---|---|
-| [开源发布](open-source-release.md) | 公开仓库与私有运行仓库的边界 |
-| [安全与网络](security-and-network.md) | 凭据、限流、反向代理与暴露面 |
+| [数据契约](reference/data-contract.md) | 快照结构、字段、校验、增量合并 |
+| [净申赎与资金口径](reference/flow-methodology.md) | 净申赎、规模、折溢价、覆盖与偏差控制 |
+| [ETF 异动雷达](reference/radar.md) | 20/60 日双基准、5 分钟窗口、回放统计 |
+| [市场拥挤度](reference/crowding.md) | 四个模块、采集、定时任务、数据源决策 |
+| [图表数据接口](reference/chart-api.md) | 每张图对应的 RQData 方法与字段 |
+| [HTTP API](reference/http-api.md) | 页面与 API 契约、状态码 |
+
+## 数据源
+
+| 文档 | 内容 |
+|---|---|
+| [RQData](reference/data-sources/rqdata.md) | 接口映射、代码与单位、权限 |
+| [DDB](reference/data-sources/ddb.md) | 表结构、字段映射、完整性与一致性 |
+| [日频数据源切换](reference/data-sources/switching.md) | 源注册、就绪判断、409 语义 |
+
+## 开发
+
+| 文档 | 内容 |
+|---|---|
+| [仓库目录](development/repo-layout.md) | 目录与模块职责 |
+| [测试](development/testing.md) | Python/Node 测试命令与要求 |
+| [发布与验证](development/release.md) | 检查清单、公开发布边界、v0.1.0 记录 |
+
+## 研究
+
+| 文档 | 内容 |
+|---|---|
+| [ETF 盘中放量研究](research/etf-intraday-burst.md) | v1→v3 规则演进、样本与验收 |
 
 ## 变更记录
 

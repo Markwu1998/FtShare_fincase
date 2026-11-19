@@ -2,16 +2,20 @@
 
 ## 未发布
 
+- 文档重构：`docs/` 由平铺改为按用途分组（overview / getting-started / operations / reference / development / research / archive），新增架构、配置、HTTP 接口、仓库结构等缺失文档；拆分合并重复内容，历史设计与验收记录归档保留，`docs/index.md` 与根目录文档链接同步更新。归档目录 `docs/archive` 仅供本地追溯，已从对外发布源码包中排除。
+- 新增市场拥挤度 RQData/DDB 核验文档：记录 DDB 表覆盖、模块映射、公募/宏观硬缺口，以及“拥挤度仍固定 RQData、不做整页 DDB 切换”的决策，避免重复评估。
 - 日频源适配器统一为 `DailySource` 协议，RQData/DDB 共用采集入口；DDB 构建不再初始化 RQData。
 - DDB 就绪检查改为逐只核心 ETF 校验，并同时校验 `mkt_fundd` 行情日期；避免只凭 max 日期误判 ready。
+- 修复 DDB 拆分识别：当 `fund_etf_nr.SPLIT_RATIO` 已提供时按份额变化校验并采用，不再因 NAV 因子不匹配误报 `share_change_review`，导致宽基日度/累计净流入从 2025-03 起出现缺口；DDB seed 已重建，宽基缺口为 0。
+- 实时延时监控改为按缓存 `checked_at` 计算，并以独立 1 秒定时器刷新；同时显示最后完整分钟相对缓存时间的落后量，避免单个 ETF 分钟缺失冻结整个延时显示。
 - 修复请求级 provider 闭包竞态：`X-Data-Provider` 改为按请求显式传入；来源状态增加 mtime 缓存。
 - 来源能力统一从 `config/data-sources.json` 读取；字段说明由后端单一来源提供，前端不再依赖静态回退。
 - 日度行业增加 `price_frequency=daily` / `label_frequency=weekly` 元数据，页面明确提示行业分类按周缓存。
 - `update_extra` 对行业/融资无新交易日数据时直接失败，不再静默发布旧快照。
 - 前端来源切换增加请求序号，避免快速切换时旧请求覆盖新状态；来源相关纯函数拆到 `data-source.js`。
 - 新增 DDB 状态、行业日度、陈旧快照、来源选择/URL 生成和 provider header 测试。
-- 日频调度合并：09:20 `update-daily-all.ps1` 一次完成 RQData ETF、日度拥挤度、融资、行业；12:30 只补 ETF/DDB；周六只检查公募；08:20 旧任务暂停。
-- 行业拥挤度由周度改为**日度**：按日计算指数成分、市值占比和成交额占比，行业分类按周缓存；已重建 `rqdata-crowding-industry.json`（246 个交易日，至 2026-11-17）。
+- **ETF 日频默认数据源切换为 DDB**；08:20 `update-daily-all.ps1` 同时构建 RQData 与 DDB，再更新日度拥挤度、融资、行业；12:30 只补 ETF/DDB；周六只检查公募。
+- 行业拥挤度由周度改为**日度**：按日计算指数成分、市值占比和成交额占比，行业分类按周缓存；已重建 `rqdata-crowding-industry.json`（247 个交易日，至 2026-11-18）。
 - 拥挤度页面按日度/周度/季度分别显示频率；不再做盘中定时刷新，打开或手动刷新读取最新快照。
 - `update-sources.ps1` 将 crowding 与 ETF 历史解耦：需要时可独立执行；RQData/DDB 失败不会影响显式的 crowding 更新。
 - 日频数据源支持 RQData / DDB 切换：新增 `config/data-sources.json`、DDB 适配器、`/api/sources`、多 seed 读取和 `?source=`；DDB 在 `fund_etf_nr` 未达到目标交易日时自动标记未就绪并返回 409。

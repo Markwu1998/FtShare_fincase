@@ -1,5 +1,7 @@
 # FtShare API → RQData 转换手册
 
+> 状态：历史核验记录 · 验证日期：2026-11-14 · 最后核对：2026-11-19
+
 验证日期为 2026-11-14，范围为当前项目的后台行情采集、净申赎计算和历史修正资料。使用同一组本地凭据，行情主样本取 2026-11-12 至 2026-11-13 的沪市 ETF 510300、深市 ETF 159915 和上证综指 000001。
 
 ## 免费额度与权限
@@ -10,7 +12,7 @@
 
 ## 运行时接口清单
 
-以下 13 个接口全部完成最小样本探测。范围来自 [盘中服务](../src/server/service.js)、[后台采集](../src/background/collector.js) 和 [历史采集](../scripts/lib/collect.mjs)。
+以下 13 个接口全部完成最小样本探测。范围来自 [盘中服务](../../../src/server/service.js)、[后台采集](../../../src/background/collector.js) 和 [历史采集](../../../scripts/lib/collect.mjs)。
 
 | 项目用途 | FtShare MCP 工具 | 当前 Key | RQData 对应方式 |
 |---|---|---|---|
@@ -28,7 +30,7 @@
 
 ## 参考数据与历史修正
 
-这些接口出现在 [图表溯源说明](../src/index.html)，历史修正证据随 [成员配置](../config/universe.json) 保存。
+这些接口出现在 [图表溯源说明](../../../src/index.html)，历史修正证据随 [成员配置](../../../config/universe.json) 保存。
 
 | 功能 | FtShare MCP 工具 | 当前 Key | RQData 或其他证据 |
 |---|---|---|---|

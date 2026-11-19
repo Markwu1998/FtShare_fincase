@@ -1,9 +1,10 @@
 # 日频数据源可切换改造设计
 
-> 状态：已实施（RQData 默认；DDB 需 `fund_etf_nr` 恢复更新后才会 ready）  
+> 状态：已实现设计（归档）· 最后核对：2026-11-19  
+> 范围：仅 ETF 资金观测台；**市场拥挤度不适用本设计**，其仍固定 RQData，评估见 [拥挤度 RQData/DDB 核验](../verification/crowding-ddb-20261118.md)。  
 > 默认方案：**RQData**  
 > 实时行情：当前为 **RQData**；实时源下拉已预留，后续可扩展其他实时源。  
-> 关联文档：[RQData / DDB 日频对照](data-sources-rqdata-ddb.md)
+> 关联文档：[RQData / DDB 日频对照](../../reference/data-sources/ddb.md)
 
 ## 1. 目标
 
@@ -604,7 +605,7 @@ function renderSourceNotes(source) {
 
 ### 7.9 视觉示意
 
-设计效果图：[data-source-switch-v3.png](mockups/data-source-switch-v3.png)
+设计效果图：[data-source-switch-v3.png](../../assets/mockups/data-source-switch-v3.png)
 
 示意重点：
 

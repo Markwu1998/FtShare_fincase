@@ -135,17 +135,28 @@ function setupSourcePickers(){
 
 function renderFreshness(){
  const el=$('freshness');if(!el)return;
- const now=new Date(Date.now()+8*3600000),hm=now.toISOString().slice(11,16),day=now.getUTCDay(),local=now.toISOString().slice(11,19);
+ const nowMs=Date.now(),now=new Date(nowMs+8*3600000),hm=now.toISOString().slice(11,16),day=now.getUTCDay(),local=now.toISOString().slice(11,19);
  const trading=day>0&&day<6&&((hm>='09:30'&&hm<='11:30')||(hm>='13:00'&&hm<='15:00'));
+ const duration=seconds=>seconds>=60?Math.floor(seconds/60)+'分'+String(Math.round(seconds%60)).padStart(2,'0')+'秒':Math.round(seconds)+'秒';
  let state='idle',text='行情等待开盘',detail='本地 '+local;
  if(seed?.demo){state='idle';text='离线演示 · 固定样本';}
  else if(live&&live.date&&live.date===now.toISOString().slice(0,10)&&live.last_complete_minute){
-  const quoteMs=Date.parse(live.date+'T'+live.last_complete_minute+':00+08:00'),latency=Math.max(0,(Date.now()-quoteMs)/1000);
-  const duration=latency>=60?Math.floor(latency/60)+'分'+String(Math.round(latency%60)).padStart(2,'0')+'秒':Math.round(latency)+'秒';
-  if(trading){state=latency>180||live.cache?.stale?'alert':latency>90?'warn':'ok';text='行情 '+live.last_complete_minute+' · 延时 '+duration;}
+  const quoteMs=Date.parse(live.date+'T'+live.last_complete_minute+':00+08:00');
+  const cacheMs=Date.parse(live.cache?.checked_at||live.fetched_at||'');
+  const quoteLag=Number.isFinite(quoteMs)?Math.max(0,(nowMs-quoteMs)/1000):0;
+  // Delay is the freshness of the delivered cache, not the last complete
+  // minute: a single missing ETF minute must not freeze the whole monitor.
+  const latency=Math.max(0,(nowMs-(Number.isFinite(cacheMs)?cacheMs:quoteMs))/1000);
+  if(trading){
+   state=latency>180||quoteLag>300||live.cache?.stale?'alert':latency>90||quoteLag>180?'warn':'ok';
+   text='行情 '+live.last_complete_minute+' · 延时 '+duration(latency);
+   if(quoteLag>180)text+=' · 分钟线落后 '+duration(quoteLag);
+  }
   else if(hm>'11:30'&&hm<'13:00'){state='closed';text='午间休市 · 行情 '+live.last_complete_minute;}
   else if(hm>='15:00'){state='closed';text='已收盘 · 行情 '+live.last_complete_minute;}
   else {state='closed';text='非交易时段 · 行情 '+live.last_complete_minute;}
+  const cacheTime=Number.isFinite(cacheMs)?new Date(cacheMs).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'--';
+  detail='本地 '+local+' · 缓存 '+cacheTime;
  }
  else if(day===0||day===6){state='closed';text='周末休市';}
  el.dataset.state=state;const t=$('freshnessText');if(t)t.textContent=text;const d=$('freshnessDetail');if(d)d.textContent=detail;
@@ -481,6 +492,6 @@ try{
  window.addEventListener('resize',()=>Object.values(charts).forEach(c=>c.resize()));
  await refresh();renderFreshness();window.__ETF_APP_READY=true;
  const s=document.createElement('script');s.src='/assets/brush.js';document.head.appendChild(s);brushLoaded=true;
- remaining=60;setInterval(tick,1000);
+ remaining=60;setInterval(tick,1000);setInterval(renderFreshness,1000);
 }catch(e){tag('tagUpdate','看板加载失败：'+e.message,'err');console.error('Dashboard initialization failed');}
 })();

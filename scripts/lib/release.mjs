@@ -6,7 +6,8 @@ export async function releaseFiles(root) {
   async function walk(path) {
     const file = relative(root, path).replaceAll('\\', '/');
     if (/(^|\/)(node_modules|private|\.local|\.openai|\.git|\.wrangler|dist|worker|releases|__pycache__)(\/|$)/.test(file) || /(^|\/)\.DS_Store$/.test(file)) return;
-    if (file === '.github/workflows/cloud-test-update.yml' || /^docs\/domain-migration-/.test(file)) return;
+    // 归档文档仅供本地追溯，不进入对外发布包
+    if (file === '.github/workflows/cloud-test-update.yml' || /^docs\/domain-migration-/.test(file) || /^docs\/archive(\/|$)/.test(file)) return;
     const info = await lstat(path);
     if (info.isSymbolicLink()) throw new Error('Release must not include symlinks: ' + relative(root, path));
     if (info.isDirectory()) for (const item of await readdir(path)) await walk(resolve(path, item));

@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | 网页服务 | `scripts/python-backend.ps1 web` | 8080 | 只读 | FastAPI；ETF 页 `/`，拥挤度页 `/crowding` |
 | 盘中采集器 | `scripts/python-backend.ps1 -Mode live -Arguments @('--watch')` | 无 | 只写 | RQData 推送；09:15 预载基准，09:30 订阅 |
-| 日频更新 | `scripts/python-backend.ps1 history -Arguments @('--source','rqdata','--recent')` | 无 | 只写 | 每日 09:20 总更新 / 12:30 补采；DDB 可选 `--source ddb` |
+| 日频更新 | `scripts/update-daily-all.ps1` | 无 | 只写 | 每日 08:20 总更新 / 12:30 补采；RQData + DDB 双源 |
 | 逐 ETF 放量 | 由采集器自动写入 | 无 | 只写 | `etf-burst/live.json` + 每日归档 |
 | 拥挤度 | `scripts/python-backend.ps1 crowding` | 无 | 只写 | 四个独立归档，按模块增量 |
 
@@ -24,10 +24,10 @@
 
 - 网页**只读文件**，快照更新后按 `mtime` 自动热加载，**不需要重启**。
 - 盘中缓存由采集器写，网页不直接访问 RQData。
-- 日频数据存在「披露延迟」：`09:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
+- 日频数据存在「披露延迟」：`08:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
 - 日切：`/api/live` 只返回**当日**（Asia/Shanghai）缓存；盘前或跨日后返回 503，页面自动刷新后盘中区域为空，09:30 新缓存到达后恢复。
 - 页头新鲜度：显示最新行情分钟、本地时间和延时；盘中延时 >90 秒变黄，>180 秒变红告警；午休/收盘显示中性的“午间休市/已收盘”。
-- 日频源可选 `RQData`（默认）或 `DDB`，页面按源读取对应 seed，不重启服务；DDB 的 `fund_etf_nr` 未达到目标交易日时自动标记未就绪，`/api/board?source=ddb` 返回 409。
+- 日频源可选 `RQData` 或 `DDB`，**当前默认 DDB**；页面按源读取对应 seed，不重启服务；DDB 的 `fund_etf_nr` 未覆盖全部核心 ETF 或行情日期落后时自动标记未就绪，`/api/board?source=ddb` 返回 409。
 - 实时源独立：目前只有 `RQData`，页面保留实时源下拉，后续新增实时源时只需增加缓存与适配器。
 
 ---
@@ -98,13 +98,13 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 
 | DSH 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频与拥挤度 09:20` | 周一至周五 09:20 | `update-daily-all.ps1`：RQData ETF + 日度拥挤度 + 融资 + 行业 |
+| `ETF 日频与拥挤度 08:20` | 周一至周五 08:20 | `update-daily-all.ps1`：RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 |
 | `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding`（RQData + 可选 DDB），补晚披露 |
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页与采集器，输出状态 |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，用当日 1m 线补全到 15:00 |
 
-08:20 旧任务已暂停，日频 ETF 合并到 09:20 总更新；12:30 仍保留 ETF/DDB 晚披露补采。
+08:20 总更新任务同时构建 RQData 与 DDB，并更新拥挤度；12:30 仍保留 ETF/DDB 晚披露补采。
 
 说明：
 
@@ -132,7 +132,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 |---|---|---|
 | 登录时 | 启动网页 + 采集器 | Windows 任务（可选）或手动 |
 | 08:25 | 检查并启动网页/采集器 | DSH `ETF 开盘前启动 08:25` |
-| 09:20 | RQData ETF + 日度拥挤度 + 融资 + 行业 | DSH `ETF 日频与拥挤度 09:20` |
+| 08:20 | RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 | DSH `ETF 日频与拥挤度 08:20` |
 | 周六 09:00 | 公募（季度）更新 | DSH `ETF 周六公募拥挤度` |
 | 09:15–09:30 | 采集器预载 60 日分钟基准 | 采集器 |
 | 09:30–15:02 | 实时推送，写盘中缓存 | 采集器 |
@@ -249,10 +249,10 @@ npm run demo:generate
 ### 4.5 日频数据源构建
 
 ```powershell
-# RQData 默认源
+# 双源顺序构建（RQData + DDB）
 & .\scripts\python-backend.ps1 history -Arguments @('--source','rqdata','--recent')
 
-# DDB 可选源（需要 DDB_PASSWORD）
+# DDB（同样需要 DDB_PASSWORD；当前默认源）
 & .\scripts\python-backend.ps1 history -Arguments @('--source','ddb','--recent')
 ```
 
@@ -316,59 +316,13 @@ DSH 定时任务不在此脚本里，需在 DSH 的调度器或本会话的定�
 
 ---
 
-## 7. 备份、恢复、迁移
+## 7. 备份、恢复与升级
 
-### 7.1 备份
-
-```powershell
-$stamp = Get-Date -Format 'yyyyMMdd-HHmm'
-Copy-Item data\private "D:\ftshare-backup\data-$stamp" -Recurse
-Copy-Item .env "D:\ftshare-backup\env-$stamp.txt"
-Copy-Item .local\rqdata-market.json "D:\ftshare-backup\rqdata-market-$stamp.json"
-```
-
-建议每次大版本升级前、以及每月一次。
-
-### 7.2 恢复
-
-1. 停网页与采集器；
-2. 把备份的 `data/private` 覆盖回去；
-3. 恢复 `.env`；
-4. 启动网页，`status.cmd` 核对日期；
-5. 需要时跑一次 `history --recent` 补齐。
-
-### 7.3 迁移到新机器
-
-1. 安装 conda 环境与 `requirements-python.txt`；
-2. 配置 `RQDATAC2_CONF`（RQData 凭据）；
-3. 复制 `data/private`、`.env`、`.local/rqdata-market.json`；
-4. 注册计划任务（`setup-tasks.cmd`）；
-5. `status.cmd` 验证。
+备份、迁移、升级与回滚步骤统一见 [备份、恢复与升级](backup-and-upgrade.md)。
 
 ---
 
-## 8. 升级与回滚
-
-- 快照带 `schema:1` 与 `formula` 版本；**跨公式版本不能直接混用**，需全量重建。
-- 升级 `rqdatac` / `rqdatac_fund` 前先备份：
-
-```powershell
-& "D:\anaconda\envs\rqsdk\python.exe" -m pip freeze > .local\rqsdk-before.lock.txt
-```
-
-- 升级后必须复测：
-
-```powershell
-& "D:\anaconda\envs\rqsdk\python.exe" -m unittest discover -s tests -p "test_*.py"
-& .\scripts\python-backend.ps1 history -Arguments @('--recent')
-```
-
-- 回滚：还原 `data/private` + `pip install -r .local\rqsdk-before.lock.txt`。
-- 网页升级不需要重启数据采集；但 `etf_backend` 代码改动需重启网页进程。
-
----
-
-## 9. 安全
+## 8. 安全
 
 - **不要**把 8080 直接暴露到公网：FastAPI 没有认证与限流（仅反向代理层可加）。
 - 对外请用 nginx/Caddy + HTTPS + 访问控制；SSE（`/api/etf-burst/stream`）需关闭代理缓冲。
@@ -377,7 +331,7 @@ Copy-Item .local\rqdata-market.json "D:\ftshare-backup\rqdata-market-$stamp.json
 
 ---
 
-## 10. 命令速查
+## 9. 命令速查
 
 ```powershell
 # 状态
@@ -414,7 +368,7 @@ Unregister-ScheduledTask -TaskName FtShare-UpdateDaily -Confirm:$false
 
 ---
 
-## 11. 本版变更记录
+## 10. 本版变更记录
 
 | 变更 | 说明 |
 |---|---|
@@ -424,5 +378,5 @@ Unregister-ScheduledTask -TaskName FtShare-UpdateDaily -Confirm:$false
 | 端口统一 8080 | README、文档、启动脚本、`.env.example` 一致 |
 | `.env` UTF-8 | 启动脚本按 UTF-8 读取，中文注释不再吞行 |
 | 运维脚本 | `start-web.cmd`、`start-collector.cmd`、`update-daily.cmd`、`setup-tasks.cmd`、`status.cmd` |
-| DSH 定时任务 | 09:20 总更新、12:30 补采、08:25 开盘前启动 |
+| DSH 定时任务 | 08:20 总更新、12:30 补采、08:25 开盘前启动 |
 | 采集器心跳 | `data/private/collector.heartbeat`，`start-collector.cmd` 据此防止重复启动 |

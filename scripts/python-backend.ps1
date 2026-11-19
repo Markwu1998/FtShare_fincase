@@ -12,7 +12,7 @@ try {
         # Read as UTF-8: Windows PowerShell 5.1 defaults to the ANSI code page,
         # which turns non-ASCII comments into mojibake that can swallow the next line.
         foreach ($line in Get-Content -LiteralPath '.env' -Encoding UTF8) {
-            if ($line -match '^\s*(RQDATA_PYTHON|RQDATA_CREDENTIAL_FILE|DATA_MODE|ENABLE_RADAR|FTSHARE_SEED_FILE|FTSHARE_LIVE_CACHE_FILE|MARKET_DATA_CONFIG_FILE|CROWDING_FILE|ETF_BURST_DIR|ETF_BURST_CONFIG|HOST|PORT)\s*=\s*(.*?)\s*$') {
+            if ($line -match '^\s*(RQDATA_PYTHON|RQDATA_CREDENTIAL_FILE|DATA_MODE|ENABLE_RADAR|FTSHARE_SEED_FILE|FTSHARE_LIVE_CACHE_FILE|MARKET_DATA_CONFIG_FILE|CROWDING_FILE|ETF_BURST_DIR|ETF_BURST_CONFIG|FTSHARE_SOURCE_CONFIG|DDB_HOST|DDB_PORT|DDB_USER|DDB_PASSWORD|HOST|PORT)\s*=\s*(.*?)\s*$') {
                 $name = $Matches[1]
                 $value = $Matches[2].Trim('"', "'")
                 if (!(Test-Path "Env:$name")) {

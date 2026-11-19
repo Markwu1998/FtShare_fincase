@@ -56,6 +56,6 @@ try {
     Write-Host ('Task registration failed: ' + $_.Exception.Message) -ForegroundColor Yellow
     Write-Host 'Run this script in a normal (not sandboxed) PowerShell session.'
     Write-Host 'If it still fails, open Task Scheduler and create the four tasks manually;'
-    Write-Host 'see docs/operations.md section 2.6 for the exact trigger and action.'
+    Write-Host 'see docs/operations/runbook.md section 2.6 for the exact trigger and action.'
     exit 1
 }

@@ -29,7 +29,7 @@ npm run check:release
 - 修改计算版本时同步更新模型版本、数据校验与文档，为旧快照提供显式校验或迁移流程。
 - 保留 ECharts 的第三方许可证与 NOTICE。
 
-CI 无需 RQData 或云平台凭据。私有运行仓库另有需要 Secrets 的采集发布任务；公开仓库仅保留无 Key CI，定时部署以模板形式交付，见[开源指南](docs/open-source-release.md)。
+CI 无需 RQData 或云平台凭据。私有运行仓库另有需要 Secrets 的采集发布任务；公开仓库仅保留无 Key CI，定时部署以模板形式交付，见[开源指南](docs/development/release.md)。
 
 ## 雷达与缓存改动
 
@@ -38,4 +38,4 @@ CI 无需 RQData 或云平台凭据。私有运行仓库另有需要 Secrets 的
 - 网页、回放、阈值控件只能读取缓存，不增加供应商请求；测试中使用合成数据或本机授权快照，不能修改正式行情测试。
 - 验证构建开关 `ENABLE_RADAR`、导航、主题和数据日期；正式发布继续使用固定源码和测试通过的同一归档。
 
-数据服务名称统一使用 **RQData**；项目名称使用 **ETF 资金与市场拥挤度观测台**。运行与定时任务见[运维手册](docs/operations.md)。
+数据服务名称统一使用 **RQData**；项目名称使用 **ETF 资金与市场拥挤度观测台**。运行与定时任务见[运维手册](docs/operations/runbook.md)。

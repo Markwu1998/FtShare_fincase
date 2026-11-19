@@ -17,6 +17,7 @@ test('public package keeps CI and the collector template with generic deployment
   assert(files.includes('.github/workflows/ci.yml'));
   assert(!files.includes('.github/workflows/cloud-test-update.yml'));
   assert(!files.some(f => f.startsWith('docs/domain-migration-')));
+  assert(!files.some(f => f.startsWith('docs/archive/')));
   assert(files.includes('docs/examples/cloud-test-update.yml'));
   const template = await readFile(new URL('../docs/examples/cloud-test-update.yml', import.meta.url), 'utf8');
   assert(template.includes('CLOUDFLARE_FORMAL_PROJECT:'));

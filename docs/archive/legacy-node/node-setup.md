@@ -1,6 +1,8 @@
-# 本地接入 RQData 行情
+# 本地接入 RQData 行情（Node 遗留）
 
-新部署使用 [Python 后端](python-backend.md)。本页的 Node 启动命令用于既有部署和回退。
+> 状态：历史 · 最后核对：2026-11-19
+
+新部署使用 [实盘数据接入](../../getting-started/live-setup.md)。本页的 Node 启动命令用于既有部署和回退。
 
 Node 后台采集器可用 RQData 提供 ETF 和上证综指的日线、历史分钟、交易日历和当日行情。RQData 分钟轴为北京时间 09:31–11:30、13:01–15:00。发布历史与当日快照使用同一时间轴，不同分钟口径的快照隔离。所有成交额由 Python 以人民币元返回，项目聚合时转换为亿元。
 
@@ -27,7 +29,7 @@ npm.cmd start
 
 手动回放时，在采集终端设置 `RQDATA_REPLAY_CACHE_FILE=data/private/rqdata-replay.json`，运行 `& ./scripts/rqdata.ps1 live --replay 2026-11-13`。验证服务需以该文件作为 `FTSHARE_LIVE_CACHE_FILE` 并显式设置 `RQDATA_ALLOW_REPLAY=1`。回放标记会保留在响应中。若要验证 60 日雷达，历史快照需要覆盖回放日前至少 60 个完整交易日。
 
-RQData 份额按其归属日读取。跨源归属日验证见 [迁移手册](market-data-provider-audit.md)。基金折算记录须经相邻净值因子验证。上市前份额没有依据时保留缺口，累计曲线在缺口处停止。兼容的旧资金快照可以保留既有完整记录。
+RQData 份额按其归属日读取。跨源归属日验证见 [迁移手册](../verification/ftshare-to-rqdata-20261114.md)。基金折算记录须经相邻净值因子验证。上市前份额没有依据时保留缺口，累计曲线在缺口处停止。兼容的旧资金快照可以保留既有完整记录。
 
 ## 参考资料对应关系
 
@@ -40,4 +42,4 @@ RQData 份额按其归属日读取。跨源归属日验证见 [迁移手册](mar
 | PCF 现金差额、成分证券及净值 | `etf.get_cash_components`、`etf.get_components` 已取样。按申赎单位净值换算前须核对份额单位和 `pre_date`。原始 PCF XML 的取回能力未验证。 |
 | 基金公告原文、申赎开放日证据 | 现有校正保留原公告及 PCF 证据。尚未确认 RQData 有可对应的公告原文下载接口。 |
 
-取样、权限和差异详见 [行情源评估](market-data-provider-audit.md)。接口见 [米筐行情文档](https://www.ricequant.com/doc/rqdata/python/generic-api) 和 [基金文档](https://www.ricequant.com/doc/rqdata/python/fund-mod.html)。
+取样、权限和差异详见 [行情源评估](../verification/ftshare-to-rqdata-20261114.md)。接口见 [米筐行情文档](https://www.ricequant.com/doc/rqdata/python/generic-api) 和 [基金文档](https://www.ricequant.com/doc/rqdata/python/fund-mod.html)。

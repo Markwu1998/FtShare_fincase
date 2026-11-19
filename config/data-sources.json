@@ -1,5 +1,5 @@
 {
-  "default": "rqdata",
+  "default": "ddb",
   "realtime_default": "rqdata",
   "sources": [
     {

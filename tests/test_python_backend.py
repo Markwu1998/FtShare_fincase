@@ -210,6 +210,18 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["X-Data-Provider"], "Demo")
 
+    def test_known_split_does_not_trigger_share_change_review(self):
+        days = ["2026-07-24", "2026-07-27"]
+        fund = {"symbol": "588940.SH", "inception_date": "2020-01-01", "listed_date": "2020-01-01"}
+        records = {
+            "shares": [(days[0], 1_219_420_000), (days[1], 2_582_840_000)],
+            "navs": [(days[0], 1.8437, 1), (days[1], 0.9348, 1)],
+            "splits": [(days[1], 2.0)],
+        }
+        row = fund_flows(fund, records, days)[days[1]]
+        self.assertIsNone(row.get("issues"))
+        self.assertIsNotNone(row["flow"])
+
     def test_reload_keeps_last_valid_snapshot_and_rejects_losing_history(self):
         original = read(ROOT / "data/demo-seed.json")
         with tempfile.TemporaryDirectory() as directory:
