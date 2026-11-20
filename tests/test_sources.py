@@ -8,14 +8,19 @@ from etf_backend.sources import (
 
 
 class FakeDDB:
-    def __init__(self, flow_dates, market_date):
+    def __init__(self, flow_dates, market_date, invalid=()):
         self.flow_dates = flow_dates
         self.market_date = market_date
+        self.invalid = set(invalid)
 
     def run(self, sql):
         if "group by TICKER_SYMBOL" in sql:
             return pd.DataFrame({"TICKER_SYMBOL": list(self.flow_dates),
                                  "maxd": [pd.Timestamp(day) for day in self.flow_dates.values()]})
+        if "where TRADE_DATE=" in sql:
+            return pd.DataFrame({"TICKER_SYMBOL": list(self.flow_dates),
+                                 "SHARES": [None if symbol in self.invalid else 1.0 for symbol in self.flow_dates],
+                                 "NAV": [1.0] * len(self.flow_dates)})
         return pd.DataFrame({"maxd": [pd.Timestamp(self.market_date)]})
 
 
@@ -75,6 +80,15 @@ class SourceMetadataTest(unittest.TestCase):
         status = adapter.status(target)
         self.assertFalse(status.ready)
         self.assertIn("未到", status.reason)
+
+    def test_ddb_status_rejects_missing_shares(self):
+        adapter = DDBAdapter(self.config)
+        core = adapter._core()
+        target = "2026-11-17"
+        adapter._session = FakeDDB({symbol: target for symbol in core}, target, invalid={core[0]})
+        status = adapter.status(target)
+        self.assertFalse(status.ready)
+        self.assertIn("份额/净值无效", status.reason)
 
     def test_ddb_status_rejects_stale_market(self):
         adapter = DDBAdapter(self.config)

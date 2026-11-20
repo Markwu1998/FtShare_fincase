@@ -5,7 +5,8 @@
 - 文档重构：`docs/` 由平铺改为按用途分组（overview / getting-started / operations / reference / development / research / archive），新增架构、配置、HTTP 接口、仓库结构等缺失文档；拆分合并重复内容，历史设计与验收记录归档保留，`docs/index.md` 与根目录文档链接同步更新。归档目录 `docs/archive` 仅供本地追溯，已从对外发布源码包中排除。
 - 新增市场拥挤度 RQData/DDB 核验文档：记录 DDB 表覆盖、模块映射、公募/宏观硬缺口，以及“拥挤度仍固定 RQData、不做整页 DDB 切换”的决策，避免重复评估。
 - 日频源适配器统一为 `DailySource` 协议，RQData/DDB 共用采集入口；DDB 构建不再初始化 RQData。
-- DDB 就绪检查改为逐只核心 ETF 校验，并同时校验 `mkt_fundd` 行情日期；避免只凭 max 日期误判 ready。
+- DDB 就绪检查改为逐只核心 ETF 校验，并同时校验 `mkt_fundd` 行情日期；进一步要求目标日 `SHARES` / `NAV` 有效，避免“日期已到但份额为空”被误判 ready。
+- 默认源 DDB 增加安全回退：DDB 未就绪时隐式默认回退 RQData，显式 `?source=ddb` 仍 409；避免盘前因 DDB ETL 未完成导致页面空白。
 - 修复 DDB 拆分识别：当 `fund_etf_nr.SPLIT_RATIO` 已提供时按份额变化校验并采用，不再因 NAV 因子不匹配误报 `share_change_review`，导致宽基日度/累计净流入从 2025-03 起出现缺口；DDB seed 已重建，宽基缺口为 0。
 - 实时延时监控改为按缓存 `checked_at` 计算，并以独立 1 秒定时器刷新；同时显示最后完整分钟相对缓存时间的落后量，避免单个 ETF 分钟缺失冻结整个延时显示。
 - 修复请求级 provider 闭包竞态：`X-Data-Provider` 改为按请求显式传入；来源状态增加 mtime 缓存。

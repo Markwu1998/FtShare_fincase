@@ -19,8 +19,11 @@ export function chooseSources(catalog, search, storedDaily, storedRealtime) {
   const sources = catalog?.sources || [];
   const realtime = catalog?.realtime_sources || [];
   const params = new URLSearchParams(search || '');
-  const pick = (requested, list, fallback) =>
-    list.some(item => item.id === requested && item.ready) ? requested : fallback;
+  const pick = (requested, list, fallback) => {
+    if (list.some(item => item.id === requested && item.ready)) return requested;
+    if (list.some(item => item.id === fallback && item.ready)) return fallback;
+    return list.find(item => item.ready)?.id || fallback;
+  };
   return {
     dailySource: pick(params.get('source') || storedDaily, sources, catalog?.default || 'rqdata'),
     realtimeSource: pick(params.get('realtime_source') || storedRealtime, realtime,

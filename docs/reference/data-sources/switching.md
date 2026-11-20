@@ -4,6 +4,8 @@
 
 ETF 资金观测台支持 **RQData / DDB** 两个日频来源，默认 **DDB**。切换是读取已构建的快照，不在请求里触发采集，也不需要重启服务。
 
+> 安全回退：如果页面打开时 DDB 尚未就绪，隐式默认会自动回退到可用的 RQData，避免盘前空白；显式 `?source=ddb` 仍返回 409。DDB 就绪后刷新页面即可自动使用 DDB。
+
 完整设计稿见归档 [日频数据源可切换改造设计](../../archive/design/data-source-switching.md)。
 
 ## 源注册
@@ -40,6 +42,7 @@ DDB 的 `ready` 规则：
 ```text
 20 只核心 ETF 的 fund_etf_nr.max(TRADE_DATE) >= 目标 flow 日期
 且每只核心都有该日期数据
+且 SHARES / NAV 均为有效值
 且 mkt_fundd 行情日期 >= 目标日期
 ```
 

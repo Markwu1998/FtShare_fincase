@@ -348,11 +348,17 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             return error("页面不存在", "not_found", 404)
         if key == "/api/sources":
             return response(source_status())
-        source_id = request.query_params.get("source") or default_source
+        requested_source = request.query_params.get("source")
+        source_id = requested_source or default_source
+        status_map = {item["id"]: item for item in source_status()["sources"]}
+        # The configured default (DDB) must never take the page down while an
+        # upstream table is still being populated. Explicit ?source= still
+        # fails closed; only the implicit default falls back to a ready source.
+        if not demo and not requested_source and not status_map.get(source_id, {}).get("ready"):
+            source_id = next((key for key, item in status_map.items() if item.get("ready")), source_id)
         selected = archives.get(source_id)
         if selected is None:
             return error("未知的日频数据源", "source_unknown", 400)
-        status_map = {item["id"]: item for item in source_status()["sources"]}
         if not demo and not status_map.get(source_id, {}).get("ready"):
             return error(status_map.get(source_id, {}).get("reason") or "该数据源尚未就绪",
                          "source_not_ready", 409)

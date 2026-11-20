@@ -251,10 +251,24 @@ class DDBAdapter:
                 "select max(TRADE_DATE) as maxd from loadTable('dfs://hermes_etf_data','mkt_fundd') "
                 f"where TICKER_SYMBOL in {core!r}")
             market_latest = str(market.iloc[0]["maxd"])[:10] if len(market) else None
+            target_rows = self.query(
+                "select TICKER_SYMBOL,SHARES,NAV from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
+                f"where TRADE_DATE={dot(target)} and TICKER_SYMBOL in {core!r}")
+            target_values = {str(row["TICKER_SYMBOL"]): (row["SHARES"], row["NAV"])
+                             for _, row in target_rows.iterrows()} if len(target_rows) else {}
         except Exception as error:
             return SourceStatus(self.id, self.label, False, reason=f"DDB 查询失败：{type(error).__name__}")
         missing = [symbol for symbol in core if symbol not in per_symbol]
         stale = [symbol for symbol in core if symbol in per_symbol and per_symbol[symbol] < target]
+        def positive(value):
+            try:
+                number = float(value)
+                return number == number and number > 0
+            except (TypeError, ValueError):
+                return False
+        invalid = [symbol for symbol in core
+                   if symbol not in target_values
+                   or not positive(target_values[symbol][0]) or not positive(target_values[symbol][1])]
         latest = min(per_symbol.values()) if per_symbol else None
         if missing:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
@@ -264,6 +278,10 @@ class DDBAdapter:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
                                 reason=f"fund_etf_nr 有 {len(stale)} 只核心 ETF 未到 {target}")
+        if invalid:
+            return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
+                                latest_flow_date=latest,
+                                reason=f"fund_etf_nr 有 {len(invalid)} 只核心 ETF 份额/净值无效")
         if not market_latest or market_latest < target:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
