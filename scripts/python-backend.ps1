@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay', 'tick-baseline')][string]$Mode,
     [string]$ReplayCache,
     [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
 )
@@ -41,13 +41,17 @@ try {
         $port = if ($env:PORT) { $env:PORT } else { '8080' }
         & $python -B -m uvicorn etf_backend.web:app --host $address --port $port @Arguments
     } else {
-        if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE -and !($Arguments -match '^--burst-input(?:=|$)')) {
+        if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE -and !($Arguments -match '^--(?:burst-input|input-dir)(?:=|$)')) {
             $secure = ConvertTo-SecureString ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $env:RQDATA_CREDENTIAL_FILE).Path))
             $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
             try { $env:RQDATAC2_CONF = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
             finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
         }
-        & $python -B -m etf_backend.collect $Mode @Arguments
+        if ($Mode -eq 'tick-baseline') {
+            & $python -B scripts/prepare-tick-baseline.py @Arguments
+        } else {
+            & $python -B -m etf_backend.collect $Mode @Arguments
+        }
     }
     exit $LASTEXITCODE
 } finally {

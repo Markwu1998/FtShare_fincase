@@ -119,3 +119,4 @@ button{border:1px solid var(--line);border-radius:8px;padding:7px 11px;backgroun
 @media(max-width:900px){.source-pickers{gap:6px}.source-trigger{min-width:0}.source-picker-label{display:none}.source-menu{width:250px}.source-badges{order:3}}
 @media(max-width:700px){.header-actions{flex-wrap:wrap}.source-pickers{order:3;width:100%;justify-content:flex-start}.source-picker{flex:1}.source-trigger{width:100%;justify-content:space-between}.source-menu{left:0;right:auto;width:100%;min-width:220px}}
 button.official-link{font:inherit;cursor:pointer}
+.radar-candidate{padding:12px 28px;color:var(--muted);font-size:12px;line-height:1.8;overflow-wrap:anywhere}.radar-candidate+.radar-candidate{border-top:1px solid var(--line)}.burst-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:850px){.radar-candidate{padding:12px 20px}.burst-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.burst-metrics>div:last-child{grid-column:auto}}

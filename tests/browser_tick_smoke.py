@@ -139,13 +139,35 @@ def main():
                 candidate_report["candidates"] = [{"symbol": BASKET[0], "as_of": datetime.now(CHINA).isoformat(),
                     "minute_end": "09:35", "provisional": True,
                     "signal": {"level": 2, "window": 5, "amount": 5e8}}]
+                candidate_report['tick_candidates'] = [{'symbol': BASKET[0], 'method': '30s-persistence',
+                    'as_of': datetime.now(CHINA).isoformat(), 'window_seconds': 30, 'amount': 6e7,
+                    'ratio': 6, 'persistence': 5 / 6, 'provisional': True}]
+                candidate_report['accounting'] = {'minutes': [[BASKET[0], '09:31', 1e8, 2e7, '09:35']]}
+                candidate_report['journal'] = {'enabled': True}
                 evaluate("window.__spoken=0;window.speechSynthesis.speak=()=>{window.__spoken++}")
                 evaluate("document.getElementById('burstSound').click()")
                 spoken_before_candidate = evaluate("window.__spoken")  # enable confirmation is intentional
                 publish(root / "burst/live.json", candidate_report)
                 wait("document.getElementById('burstCandidates').textContent.includes('未确认、不播报')")
+                wait("document.getElementById('tickFactorCandidates').textContent.includes('30秒')")
+                wait("document.getElementById('burstGross').textContent", '1.00')
+                wait("document.getElementById('burstExcess').textContent", '0.80')
+                assert evaluate("document.getElementById('burstFlow').textContent") == '—'
+                evaluate("fetch(document.getElementById('burstJournal').href).then(r=>r.json()).then(v=>window.__journalOK=Array.isArray(v.rows))")
+                wait('window.__journalOK===true')
                 assert evaluate("document.getElementById('burstEvents').children.length") == 0
                 assert evaluate("window.__spoken") == spoken_before_candidate
+                evaluate("document.getElementById('tickFactorCandidates').scrollIntoView({block:'center',behavior:'instant'});document.body.insertAdjacentHTML('beforeend','<div id=\"__synthetic\" style=\"position:fixed;bottom:0;left:0;z-index:99999;background:#fff5cf;padding:8px\">离线合成验收 · 非真实成交或告警</div>')")
+                upgrade_screenshot = ROOT / '.local/tick-burst-upgrade-ui.png'
+                upgrade_screenshot.write_bytes(base64.b64decode(call('Page.captureScreenshot', {'format': 'png'})['data']))
+                call('Emulation.setDeviceMetricsOverride', {'width':390,'height':844,'deviceScaleFactor':1,'mobile':False})
+                wait("getComputedStyle(document.querySelector('.burst-metrics')).gridTemplateColumns.split(' ').length===2")
+                wait("getComputedStyle(document.getElementById('chartNavigation')).visibility==='hidden'&&document.getElementById('chartNavigation').getBoundingClientRect().right<=0")
+                evaluate("document.querySelector('.burst-metrics').scrollIntoView({block:'center',behavior:'instant'})")
+                mobile_screenshot = ROOT / '.local/tick-burst-mobile.png'
+                mobile_screenshot.write_bytes(base64.b64decode(call('Page.captureScreenshot', {'format':'png'})['data']))
+                call('Emulation.setDeviceMetricsOverride', {'width':1440,'height':1000,'deviceScaleFactor':1,'mobile':False})
+                evaluate("document.getElementById('__synthetic').remove()")
                 charts = evaluate("['chart','chartCum','chartTypCase','chartTypNorm','chartBroad','chartDAmt','chartDNf','chartAmt','chartNf'].filter(id=>echarts.getInstanceByDom(document.getElementById(id))).length")
                 assert charts == 9, "Missing original charts"
                 # Force SSE unavailable on reload, then verify the 2-second fallback.
@@ -186,6 +208,9 @@ def main():
                                   "bar_updates_minute_chart": True, "original_charts": charts,
                                   "sse_failure_poll_fallback": True, "cached_history_replay_ui": history_checked,
                                   "candidate_shown_without_formal_event_or_speech": True,
+                                  'second_candidates_and_accounting_visible': True, 'journal_api': True,
+                                  'upgrade_screenshot': str(upgrade_screenshot),
+                                  'mobile_accounting_columns': 2, 'mobile_screenshot': str(mobile_screenshot),
                                   "screenshot": str(screenshot)}, ensure_ascii=False))
         finally:
             if process:

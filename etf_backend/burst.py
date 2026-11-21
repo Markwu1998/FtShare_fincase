@@ -124,6 +124,8 @@ class BurstDay:
         self.active = {}
         self.shadow = {}
         self.baseline_as_of = baseline_as_of
+        self.on_signal = None
+        self.accounted = {}
 
     def add(self, symbol, slot, amount, received=None, *, recovered=False):
         end = SLOT_INDEX.get(slot, -1)
@@ -144,6 +146,8 @@ class BurstDay:
         if not signal:
             return
         detected = None if self.replay else iso_utc(datetime.now(CHINA))
+        if received:
+            signal['received_at'] = received
         event = self.active.get(symbol)
         if event is None or end - SLOT_INDEX[event["last"]] > 10:
             event = {"id": f"{self.day}/{symbol}/{slot}", "symbol": symbol, "first": slot, "last": slot,
@@ -168,6 +172,21 @@ class BurstDay:
             if (signal["level"], min(signal["daily"], default=0) if None not in signal["daily"] else 0) > (
                     peak["level"], min(peak["daily"], default=0) if None not in peak["daily"] else 0):
                 event["peak"] = signal
+        if signal['level'] >= 2:
+            for i in range(SLOT_INDEX[signal['start']], end + 1):
+                refs = self.baseline[symbol][1].get((1, i), ([None, None],))[0]
+                reference = max(refs) if all(finite(v) for v in refs) else None
+                self.accounted.setdefault((symbol, i), [symbol, SLOTS[i], values[i], reference, slot, received])
+        if self.on_signal:
+            self.on_signal(event, signal, received, detected, recovered)
+
+    def accounting(self):
+        rows = list(self.accounted.values())
+        known = [r for r in rows if finite(r[3])]
+        return {'method': 'confirmed-window-union-v1', 'unit': 'CNY', 'minutes': rows,
+                'gross': sum(r[2] for r in rows), 'covered_minutes': len(rows),
+                'reference_coverage': len(known),
+                'positive_excess': sum(max(r[2] - r[3], 0) for r in known) if len(known) == len(rows) else None}
 
     def payload(self):
         return {"schema_version": 2, "unit": "CNY", "rule_version": RULE_VERSION,
@@ -177,7 +196,8 @@ class BurstDay:
                                                                          for s, values in self.values.items()}},
                 "symbols": list(self.values), "provider": "RQData", "date": self.day, "quantile": self.quantile, "metric": "turnover", "replay": self.replay,
                 "through": SLOTS[max(self.latest.values())] if self.latest else None,
-                "updated_at": iso_utc(datetime.now(CHINA)), "events": self.events, "median_hits": self.shadow}
+                "updated_at": iso_utc(datetime.now(CHINA)), "events": self.events, "median_hits": self.shadow,
+                "accounting": self.accounting()}
 
 
 def query_history(api, start, end, symbols=BASKET):

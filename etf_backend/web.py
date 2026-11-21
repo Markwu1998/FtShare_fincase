@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from starlette.concurrency import run_in_threadpool
 
 from .burst import DEFAULT_DIR as BURST_DIR, validate_metric
+from .burst_ledger import read_journal
 from .collect import ROOT, read
 from .crowding import DEFAULT_PATH as CROWDING_PATH, validate_snapshot as validate_crowding
 from .crowding_extra import MODULES, path_for, validate_extra
@@ -368,6 +369,22 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             return HTMLResponse(index, headers={"Cache-Control": "no-cache"})
         if key in {"/crowding", "/crowding/"}:
             return HTMLResponse(crowding_page, headers={"Cache-Control": "no-cache"})
+        if key == '/api/etf-burst/journal':
+            if demo or not radar:
+                return error('盘中放量监控未启用', 'burst_disabled', 404)
+            day = request.query_params.get('date', '')
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+                return error('查询日期无效', 'invalid_date', 400)
+            try:
+                after = int(request.query_params.get('after', '0'))
+                limit = int(request.query_params.get('limit', '200'))
+                if after < 0 or not 1 <= limit <= 1000:
+                    raise ValueError()
+            except ValueError:
+                return error('分页参数无效', 'invalid_query', 400)
+            rows = read_journal(event_dir / 'journals' / f'{day}.sqlite3', after, limit,
+                                request.query_params.get('symbol'), request.query_params.get('kind'))
+            return response({'date': day, 'rows': rows, 'next_after': rows[-1]['seq'] if rows else after})
         if key in {"/api/etf-burst", "/api/etf-burst/dates"}:
             if demo or not radar:
                 return error("盘中放量监控未启用", "burst_disabled", 404)

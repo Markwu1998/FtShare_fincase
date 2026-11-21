@@ -72,4 +72,6 @@ $env:PORT = '8080'
 
 [图表接口](docs/chart-interfaces.md) · [数据与计算](docs/data.md) · [参与开发](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 
+[盘中异动：金额累计、事件日志、秒级候选与回放](docs/tick-driver.md) · [成交额与日末申赎的研究口径](docs/etf-intraday-factor-review-20261121.md)
+
 [MIT 开源许可](LICENSE) · [第三方许可](THIRD_PARTY_NOTICES.md)

@@ -1,4 +1,4 @@
-import { evaluateRadar, RADAR_DEFAULTS, burstAnnouncement } from './radar-math.js';
+import { evaluateRadar, RADAR_DEFAULTS, burstAnnouncement, burstAccounting, visibleBurstSignals } from './radar-math.js';
 const fmt = (v, n = 1) => Number.isFinite(v) ? Number(v).toLocaleString('zh-CN', { minimumFractionDigits: n, maximumFractionDigits: n }) : '—';
 const signed = v => Number.isFinite(v) ? (v > 0 ? '+' : '') + fmt(v, 2) : '—';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -26,7 +26,10 @@ export function createRadar(root) {
         <span class="radar-voice-status" id="burstVoiceStatus">检测语音引擎…</span>
       </div>
       <div class="tscroll"><table><thead><tr><th>ETF</th><th>首报 / 最新</th><th>级别</th><th>成交额窗口</th><th>同窗额比 20／60日</th><th>全天额比 20／60日</th><th>交易证据</th></tr></thead><tbody id="burstEvents"></tbody></table></div>
-      <p id="burstCandidates" role="status">Tick 分钟内候选：等待行情；不触发正式告警。</p>
+      <p class="radar-candidate" id="burstCandidates" role="status">Tick 分钟内候选：等待行情；不触发正式告警。</p>
+      <p class="radar-candidate" id="tickFactorCandidates" role="status">秒级持续放量候选：等待历史 Tick 基准。</p>
+      <div class="radar-metrics burst-metrics"><div><span>确认窗口去重成交额</span><strong id="burstGross">—</strong><small>亿元 · 二级及以上窗口并集</small></div><div><span>正超额成交额</span><strong id="burstExcess">—</strong><small>亿元 · 相对同分钟 P75</small></div><div><span>同篮子日末净申赎</span><strong id="burstFlow">—</strong><small>亿元 · 盘后归属值，非盘中可用信号</small></div><div><span>净申赎 / 异常成交额</span><strong id="burstFlowRatio">—</strong><small>量级比较，不代表净买入比例</small></div></div>
+      <details class="radar-rules"><summary>事件日志与复盘口径</summary><p>实盘追加保留候选、正式命中、结束和原始行情时间／接收时间。候选不计入确认成交额，不播报；重叠窗口只计一次。日末净申赎与盘中成交属于不同口径，不能据此确认交易主体。</p><a id="burstJournal" target="_blank" rel="noopener">查看正式命中日志（前200条，可分页）</a></details>
       <details><summary>Tick 与供应商 bar 对账</summary><p id="tickComparison">等待对账</p></details>
       <div id="burstDetail" class="chart" style="height:250px" hidden aria-label="所选事件的成交量与同窗基准"></div>
     </div>
@@ -53,8 +56,22 @@ export function createRadar(root) {
     }
     const cutoff = burst.replay ? ($('burstTime').value || '14:57') : '15:00';
     const knownNames = names();
+    const accounting = burstAccounting(seed, burst, cutoff);
+    $('burstGross').textContent = fmt(accounting?.gross, 2);
+    $('burstExcess').textContent = fmt(accounting?.excess, 2);
+    $('burstFlow').textContent = signed(accounting?.flow);
+    $('burstFlowRatio').textContent = Number.isFinite(accounting?.ratio) ? fmt(accounting.ratio, 2) + '×' : '—';
+    $('burstJournal').href = '/api/etf-burst/journal?date=' + encodeURIComponent(burst.date) + '&kind=formal';
+    $('burstJournal').hidden = !!burst.replay || !burst.journal?.enabled;
+    const visibleAt = c => Date.parse(c.received_at || c.as_of) <= Date.parse(burst.date + 'T' + cutoff + ':00+08:00');
+    const tickHistory = burst.replay ? (burst.tick_candidate_history || []).filter(visibleAt).slice(-10) : burst.tick_candidates || [];
+    const factor = burst.tick_factor_status;
+    $('tickFactorCandidates').textContent = tickHistory.length ? '秒级持续放量候选（未确认、不播报）：' + tickHistory.map(c =>
+      (knownNames.get(c.symbol) || c.symbol) + ' · ' + c.window_seconds + '秒 · ' + fmt(c.amount / 1e8, 2) + '亿元 · 同窗 ' + fmt(c.ratio, 1) + '× · 持续占比 ' + fmt(c.persistence * 100, 0) + '%').join('；')
+      : burst.replay ? '该时点无秒级候选；仅记录 Tick 接收序列和历史秒级基准的回放可还原。'
+      : '秒级持续放量候选：暂无；历史基准 ' + (factor?.state || '待准备') + '，覆盖 ' + (factor?.covered ?? 0) + '/' + (factor?.expected ?? burst.symbols?.length ?? 20) + '只。';
     const tickReplay=burst.replay&&burst.feed==='tick-replay';
-    const candidates=tickReplay?(burst.candidate_history||[]).filter(c=>Date.parse(c.as_of)<=Date.parse(burst.date+'T'+cutoff+':00+08:00')).slice(-10):burst.replay?[]:burst.candidates||[];
+    const candidates=tickReplay?(burst.candidate_history||[]).filter(visibleAt).slice(-10):burst.replay?[]:burst.candidates||[];
     $('burstCandidates').textContent=candidates.length?(tickReplay?'Tick 历史候选（仅展示、不播报）：':'Tick 分钟内候选（未确认、不播报）：')+candidates.map(c=>
       (knownNames.get(c.symbol)||c.symbol)+' · '+c.signal.window+'分钟 · '+levels[c.signal.level]+'候选 · '+fmt(c.signal.amount/1e8,2)+'亿元 · 行情 '+new Date(c.as_of).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})).join('；')
       :tickReplay?'该回放时点暂无 Tick 候选。':burst.replay?'历史分钟回放不还原分钟内 Tick 候选。':'Tick 分钟内候选：暂无；候选不计入正式事件，不触发播报。';
@@ -64,22 +81,24 @@ export function createRadar(root) {
       '；已对账 '+monitor.compared+' 个分钟格，金额不一致 '+monitor.mismatched+' 个，共同完成分钟的事件差异 '+(monitor.event_mismatches??0)+' 个，待补 '+monitor.unrecovered+' 个，已由 bar 补齐 '+monitor.recovered+' 个。'+
       (monitor.differences||[]).slice(-5).map(r=>r.symbol+' '+r.slot+' 差额 '+fmt(r.difference,2)+'元').join('；')
       :'该归档没有 Tick 对账信息。';
-    const rows = burst.events.filter(event => event.first <= cutoff).slice().sort((a,b) => b.first.localeCompare(a.first));
+    const rows = burst.events.filter(event => event.first <= cutoff && (!burst.replay || visibleBurstSignals(event, burst.date, cutoff).length)).slice().sort((a,b) => b.first.localeCompare(a.first));
     details = new Map();
     const pair = (values, mode) => values.map(v => v == null ? '—' : mode === 'pct' ? fmt(v * 100, 1) + '%' : fmt(v, 1) + '×').join(' / ');
     $('burstEvents').innerHTML = rows.map(event => {
-      const signal = burst.replay && event.peak.end > cutoff ? event.updates.filter(v => v.end <= cutoff)
+      const updates = burst.replay ? visibleBurstSignals(event, burst.date, cutoff) : event.updates;
+      const signal = burst.replay ? updates
         .reduce((best, v) => v.level > best.level || v.level === best.level &&
           Math.min(...v.daily) > Math.min(...best.daily) ? v : best) : event.peak;
-      const {premium, premium_cross, pressure, peers, index} = event.evidence;
+      const {premium, premium_cross, pressure, peers, index, ring} = event.evidence;
       const evidence = burst.replay ? [] : [
         premium && '溢价 ' + signed(premium.bp) + ' bp',
         premium_cross && '持续转溢',
         pressure && '卖一上移伴成交 ' + pressure.ask_up_with_volume + '次',
         peers?.length && '同指数同步 ' + peers.join('、'),
         index && '指数2分钟 ' + signed(index.pct) + '%' + (index.above_p95 ? ' · 超P95' : ''),
+        Number.isFinite(ring?.adjusted) && '调整后日内环比 ' + fmt(ring.adjusted, 1) + '×',
       ].filter(Boolean);
-      const last = event.last <= cutoff ? event.last : signal.end;
+      const last = burst.replay ? updates.at(-1).end : event.last;
       details.set(event.id, signal);
       return `<tr><td>${esc(knownNames.get(event.symbol) || event.symbol)} <small>${esc(event.symbol)}</small></td>
         <td>${esc(event.first)} / ${esc(last)}</td><td>${levels[signal.level]}${event.recovered && !burst.replay ? ' · 补数' : ''}</td>

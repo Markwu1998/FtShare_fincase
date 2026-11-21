@@ -30,7 +30,7 @@ def reference():
 
 class TickAggregationTest(unittest.TestCase):
     def test_cumulative_amount_not_tick_sum_and_exact_boundary(self):
-        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL])
+        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL], "legacy-right")
         agg.add(SYMBOL, clock("09:30:00"), 1, 50)
         agg.add(SYMBOL, clock("09:30:58"), 1.1, 120)
         agg.add(SYMBOL, clock("09:31:00"), 1.2, 150)
@@ -42,7 +42,7 @@ class TickAggregationTest(unittest.TestCase):
         self.assertEqual(agg.advance(clock("09:32:02"))[0]["amount"], 50)
 
     def test_unsealed_reordering_and_duplicates(self):
-        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL])
+        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL], "legacy-right")
         agg.add(SYMBOL, clock("09:30:58"), 1, 120)
         self.assertTrue(agg.add(SYMBOL, clock("09:30:55"), 1, 110))
         self.assertFalse(agg.add(SYMBOL, clock("09:30:58"), 1, 120))
@@ -51,7 +51,7 @@ class TickAggregationTest(unittest.TestCase):
         self.assertEqual(agg.rejected, {"late": 1, "duplicate": 1, "regression": 0})
 
     def test_counter_regression_and_missing_boundaries_do_not_make_zero_bars(self):
-        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL])
+        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL], "legacy-right")
         agg.add(SYMBOL, clock("09:30:55"), 1, 120)
         self.assertFalse(agg.add(SYMBOL, clock("09:30:58"), 1, 100))
         self.assertFalse(agg.advance(clock("09:31:02"))[0]["valid"])
@@ -60,7 +60,7 @@ class TickAggregationTest(unittest.TestCase):
         self.assertFalse(agg.advance(clock("09:33:02"))[0]["valid"])
 
     def test_lunch_anchors_cumulative_but_does_not_create_lunch_minutes(self):
-        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL])
+        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL], "legacy-right")
         agg.add(SYMBOL, clock("11:29:59"), 1, 1000)
         agg.advance(clock("11:30:02"))
         self.assertEqual(agg.advance(clock("12:30:00")), [])
@@ -71,7 +71,7 @@ class TickAggregationTest(unittest.TestCase):
         self.assertEqual(rows[0]["end"].strftime("%H:%M"), "13:01")
 
     def test_candidate_uses_original_formula_without_changing_formal_state(self):
-        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL])
+        agg = TickMinutes(DAY, [SYMBOL], [SYMBOL], "legacy-right")
         detector = BurstDay(DAY, reference(), .75, symbols=[SYMBOL])
         for i in range(4):
             detector.add(SYMBOL, SLOTS[i], 1)
@@ -170,7 +170,7 @@ class TickDriverTest(unittest.TestCase):
             for i, cash in enumerate([1, 1, 1, 1, 120]):
                 end = clock(SLOTS[i] + ":00")
                 total += cash
-                session.tick_minutes.add(SYMBOL, end, 1, total)
+                session.tick_minutes.add(SYMBOL, end - timedelta(milliseconds=1), 1, total)
                 session.advance_ticks(end + timedelta(seconds=2))
             self.assertEqual(session.detector.events[0]["level"], 2)
             self.assertEqual(session.detector.events[0]["first"], "09:35")
@@ -192,7 +192,7 @@ class TickDriverTest(unittest.TestCase):
             session = self.session(directory, "provider")
             for i, cash in enumerate([1, 1, 1, 1, 120]):
                 end = clock(SLOTS[i] + ":00")
-                session.tick_minutes.add(SYMBOL, end, 1, i + 1)
+                session.tick_minutes.add(SYMBOL, end - timedelta(milliseconds=1), 1, i + 1)
                 session.advance_ticks(end + timedelta(seconds=2))
                 session.bar(SYMBOL, end, 1, cash, cash)
             self.assertEqual(session.detector.events[0]["level"], 2)

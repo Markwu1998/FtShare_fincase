@@ -3,7 +3,7 @@
 Snapshots cannot reveal which side of a minute boundary every trade belongs to.
 Keep provider bars for comparison/recovery before enabling this as the driver.
 """
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
 
 from .model import SLOTS, finite
@@ -12,10 +12,15 @@ from .burst import BurstDay, SLOT_INDEX, detect
 
 FINALIZE_DELAY = timedelta(seconds=2)
 MAX_BOUNDARY_AGE = timedelta(seconds=10)
+CLOSE_WINDOW = timedelta(seconds=5)
 
 
 class TickMinutes:
-    def __init__(self, day, symbols, turnover_symbols):
+    def __init__(self, day, symbols, turnover_symbols, boundary_mode="provider-v2"):
+        if boundary_mode not in {"provider-v2", "legacy-right"}:
+            raise ValueError('Unknown Tick minute boundary mode')
+        self.boundary_mode = boundary_mode
+        self.legacy = boundary_mode == "legacy-right"
         self.day = day
         self.symbols = list(symbols)
         self.turnover_symbols = set(turnover_symbols)
@@ -31,7 +36,10 @@ class TickMinutes:
             return False
         if symbol in self.turnover_symbols and (not finite(cumulative) or cumulative < 0):
             return False
-        if self.next_slot and timestamp <= self.ends[self.next_slot - 1]:
+        sealed = self.ends[self.next_slot - 1] if self.next_slot else None
+        late = sealed and (timestamp <= sealed if self.legacy else
+                          timestamp <= sealed + CLOSE_WINDOW if self.is_close(sealed) else timestamp < sealed)
+        if late:
             self.rejected["late"] += 1
             return False
         times, rows = self.times[symbol], self.rows[symbol]
@@ -43,24 +51,37 @@ class TickMinutes:
         if finite(cumulative) and any(finite(r[2]) and ((r[0] < timestamp and r[2] > cumulative) or
                                                        (r[0] > timestamp and r[2] < cumulative)) for r in neighbors):
             self.rejected["regression"] += 1
-            slot = bisect_right(self.ends, timestamp - timedelta(microseconds=1))
+            slot = bisect_right(self.ends, timestamp - (timedelta(microseconds=1) if self.legacy else timedelta()))
+            if not self.legacy and slot and self.is_close(self.ends[slot - 1]) and timestamp <= self.ends[slot - 1] + CLOSE_WINDOW:
+                slot -= 1
             self.bad.add((symbol, slot))
             return False
         times.insert(offset, timestamp)
         rows.insert(offset, (timestamp, close, cumulative))
         return True
 
-    def endpoint(self, symbol, end, *, afternoon_start=False):
-        offset = bisect_right(self.times[symbol], end) - 1
+    @staticmethod
+    def is_close(end):
+        return end.strftime('%H:%M:%S') in {'11:30:00', '15:00:00'}
+
+    def endpoint(self, symbol, end, *, afternoon_start=False, current=False):
+        closing = self.is_close(end) and not self.legacy and not current
+        target = end + CLOSE_WINDOW if closing else end
+        search = bisect_right if closing or current or self.legacy else bisect_left
+        offset = search(self.times[symbol], target) - 1
         if offset < 0:
             return None
         row = self.rows[symbol][offset]
-        if end - row[0] <= MAX_BOUNDARY_AGE:
+        if -CLOSE_WINDOW <= end - row[0] <= MAX_BOUNDARY_AGE:
             return row
         # No trading during lunch: a fresh AM closing snapshot may anchor 13:00.
         if afternoon_start:
             am_end = end.replace(hour=11, minute=30)
-            if am_end - MAX_BOUNDARY_AGE <= row[0] <= am_end:
+            if not self.legacy:
+                closing = bisect_right(self.times[symbol], am_end + CLOSE_WINDOW) - 1
+                if closing >= 0:
+                    row = self.rows[symbol][closing]
+            if am_end - MAX_BOUNDARY_AGE <= row[0] <= am_end + (CLOSE_WINDOW if not self.legacy else timedelta()):
                 return row
         return None
 
@@ -79,9 +100,12 @@ class TickMinutes:
         return delta if delta >= 0 else None
 
     def advance(self, now):
-        """Seal elapsed minutes using market timestamps and a two-second grace."""
+        """Seal elapsed minutes: 2s grace normally, 6s at session closes."""
         output = []
-        while self.next_slot < len(self.ends) and self.ends[self.next_slot] + FINALIZE_DELAY <= now:
+        while self.next_slot < len(self.ends):
+            delay = CLOSE_WINDOW + timedelta(seconds=1) if not self.legacy and self.is_close(self.ends[self.next_slot]) else FINALIZE_DELAY
+            if self.ends[self.next_slot] + delay > now:
+                break
             index = self.next_slot
             end = self.ends[index]
             for symbol in self.symbols:
@@ -102,7 +126,7 @@ class TickMinutes:
         start = end - timedelta(minutes=1)
         if not start <= now < end:
             return None  # opening/lunch gaps are not trading minutes
-        row = self.endpoint(symbol, now)
+        row = self.endpoint(symbol, now, current=True)
         if row is None or row[0] < start:
             return None
         cash = self.amount(symbol, index, row)
@@ -128,20 +152,22 @@ def partial_signals(aggregator, detector, now):
     return result
 
 
-def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None):
+def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, boundary_mode='legacy-right', factor_references=None):
     """Replay recorded reception order; do not move late data back in time.
 
     Rows: [symbol, market_timestamp, received_timestamp, close, day_turnover].
     Historical 1m/1d data is used only to prepare the supplied prior-day baseline.
     """
-    aggregator = TickMinutes(day, symbols, symbols)
+    aggregator = TickMinutes(day, symbols, symbols, boundary_mode)
     detector = BurstDay(day, baseline, q, replay=True, symbols=symbols, baseline_as_of=baseline_as_of)
     last_received, candidates, levels = None, [], {}
+    tick_history, factor_states = [], {}
 
     def advance(now):
         for row in aggregator.advance(now):
             if row["valid"]:
-                detector.add(row["symbol"], row["end"].strftime("%H:%M"), row["amount"])
+                detector.add(row["symbol"], row["end"].strftime("%H:%M"), row["amount"],
+                             None if boundary_mode == 'legacy-right' else now.isoformat())
 
     for symbol, market, received, close, cash in ticks:
         market = datetime.fromisoformat(market.replace("Z", "+00:00"))
@@ -157,12 +183,20 @@ def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None):
             raise ValueError("Tick market timestamp is in the future")
         last_received = received
         advance(received)
-        aggregator.add(symbol, market, close, cash)
+        accepted = aggregator.add(symbol, market, close, cash)
+        if accepted and factor_references and 0 <= (received - market).total_seconds() <= 10:
+            from .tick_factors import candidates as factor_candidates
+            for candidate in factor_candidates(aggregator, baseline, factor_references, symbol, market):
+                key = symbol, candidate['method']
+                if candidate['as_of'] != factor_states.get(key):
+                    tick_history.append({**candidate, 'received_at': received.isoformat()})
+                    factor_states[key] = candidate['as_of']
         for candidate in partial_signals(aggregator, detector, received):
             key = candidate["symbol"], candidate["minute_end"]
             if candidate["signal"]["level"] > levels.get(key, 0):
                 levels[key] = candidate["signal"]["level"]
-                candidates.append(candidate)
-    advance(datetime.fromisoformat(day + "T15:00:02").replace(tzinfo=CHINA))
+                candidates.append({**candidate, 'received_at': received.isoformat()})
+    advance(datetime.fromisoformat(day + "T15:00:06").replace(tzinfo=CHINA))
     return {**detector.payload(), "feed": "tick-replay", "minute_driver": "tick",
-            "candidate_history": candidates, "tick_rejections": aggregator.rejected}
+            "candidate_history": candidates, "tick_rejections": aggregator.rejected, 'boundary_mode': boundary_mode,
+            'tick_candidate_history': tick_history}

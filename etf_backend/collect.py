@@ -261,6 +261,8 @@ def main():
                         help="Re-collect the recent overlap window and merge it into the existing history snapshot")
     parser.add_argument("--burst-dir", default=os.environ.get("ETF_BURST_DIR", "data/private/etf-burst"))
     parser.add_argument("--burst-config", default=os.environ.get("ETF_BURST_CONFIG", "config/etf-burst.json"))
+    parser.add_argument('--tick-boundary', choices=['legacy-right', 'provider-v2'], default='legacy-right')
+    parser.add_argument('--tick-factor-baseline', help='Prepared Tick baseline file for a single replay day')
     parser.add_argument("--burst-input", help="Use a schema_version=2 turnover/CNY export for offline replay")
     parser.add_argument("--replay", type=lambda s: datetime.fromisoformat(s).date().isoformat())
     args = parser.parse_args()
@@ -422,8 +424,15 @@ def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, s
         else:
             from .burst import make_baseline
             from .tick_minutes import replay_tick_day
+            from .tick_factors import load_references
+            previous = max((d for d in calendar if d < day), default=None)
+            refs = None
+            if args.tick_factor_baseline:
+                refs, state = load_references(args.tick_factor_baseline, day, previous, q)
+                if state != 'ready':
+                    raise ValueError('Tick replay baseline is ' + state)
             archive = replay_tick_day(day, make_baseline(calendar, minutes, daily, day, q, symbols), q, ticks,
-                                      symbols, max((d for d in calendar if d < day), default=None))
+                                      symbols, previous, boundary_mode=args.tick_boundary, factor_references=refs)
         if archive["through"] is None:
             raise ValueError(f"Missing replay minutes for {day}")
         publish(burst_dir / "replay" / f"{day}.json", archive)

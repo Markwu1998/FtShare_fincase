@@ -11,6 +11,8 @@ from time import monotonic, sleep
 from . import provider
 from .burst import BurstDay, query_history, make_baseline, SLOT_INDEX, RULE_VERSION
 from .tick_minutes import TickMinutes, partial_signals
+from .burst_ledger import BurstLedger
+from .tick_factors import load_references, candidates as tick_candidates, FACTOR_VERSION
 from .collect import live_snapshot, publish, read
 from .model import BASKET, INDEX, SLOTS, iso_utc, trading_minute
 
@@ -81,6 +83,40 @@ class PushSession:
                                           baseline_as_of=self.calendar[-2])
             if minute_driver == "tick":
                 self.detector = self.tick_detector
+        from hashlib import sha256
+        self.tick_references, self.tick_reference_status = load_references(
+            burst_dir / 'tick-baselines' / f'{day}.json', day,
+            self.calendar[-2] if len(self.calendar) > 1 else None, q)
+        self.tick_references = {s: r for s, r in self.tick_references.items() if s in self.symbols}
+        self.journal = BurstLedger(burst_dir / 'journals' / f'{day}.sqlite3', {
+            'day': day, 'driver': minute_driver, 'rule_version': RULE_VERSION, 'quantile': q,
+            'boundary_mode': self.tick_minutes.boundary_mode, 'symbols': self.symbols,
+            'baseline_as_of': self.calendar[-2] if len(self.calendar) > 1 else None,
+            'baseline_hash': sha256(repr(self.detector.baseline if self.detector else {}).encode()).hexdigest(),
+            'tick_factor_version': FACTOR_VERSION,
+            'tick_reference_hash': sha256(json.dumps(self.tick_references, sort_keys=True).encode()).hexdigest()})
+        self.candidate_states, self.ended_events = {}, set()
+        self.second_candidates = {}
+        if self.detector:
+            self.detector.on_signal = self.record_signal
+
+    def record_signal(self, event, signal, received, detected, recovered):
+        values = self.detector.values[event['symbol']]
+        end = SLOT_INDEX[signal['end']]
+        start = 120 if end >= 120 else 0
+        ring = {'raw': None, 'adjusted': None}
+        if end - start >= 20:
+            history = values[end - 20:end]
+            refs = [self.detector.baseline[event['symbol']][1].get((1, i), [[None, None]])[0]
+                    for i in range(end - 20, end + 1)]
+            if all(v is not None for v in history) and sum(history) > 0:
+                ring['raw'] = values[end] * 20 / sum(history)
+                if all(all(v is not None and v > 0 for v in r) for r in refs):
+                    ring['adjusted'] = (values[end] / max(refs[-1])) / (sum(history) / sum(max(r) for r in refs[:-1]))
+        self.journal.append('formal', event['symbol'], f"{self.day}T{signal['end']}:00+08:00", received,
+                            {'event_id': event['id'], 'signal': signal, 'detected_at': detected,
+                             'recovered': recovered, 'ring': ring})
+        event['evidence']['ring'] = ring
 
     def load_baseline(self, api):
         previous = self.calendar[-2]
@@ -149,6 +185,9 @@ class PushSession:
         if symbol in self.symbols and (cash is None or cash < 0):
             return
         row = (symbol, int(timestamp.timestamp() * 1000), close, cash)
+        received = received or iso_utc(datetime.now(provider.CHINA))
+        self.journal.append('bar', symbol, iso_utc(timestamp), received,
+                            {'close': close, 'total_turnover': cash, 'recovered': recovered})
         self.provider_minutes[key] = row
         self.feed_detector(self.provider_detector, symbol, slot, cash, received, recovered=recovered)
         if self.minute_driver == "provider":
@@ -169,6 +208,9 @@ class PushSession:
         if key in self.recoveries:
             return
         symbol, slot = key
+        received = received or iso_utc(datetime.now(provider.CHINA))
+        self.journal.append('recovery', symbol, f'{self.day}T{slot}:00+08:00', received,
+                            {'source': 'provider', 'amount': row[3]})
         self.recoveries.add(key)
         self.feed_detector(self.tick_detector, symbol, slot, row[3], received, recovered=True)
         if self.minute_driver == "tick":
@@ -186,6 +228,9 @@ class PushSession:
                 if self.minute_driver == "tick":
                     self.minutes[key] = row
             else:
+                if key not in self.tick_gaps:
+                    self.journal.append('data_gap', symbol, iso_utc(timestamp), iso_utc(now),
+                                        {'boundary_mode': self.tick_minutes.boundary_mode})
                 self.tick_gaps.add(key)
                 if key in self.provider_minutes:
                     self.recover_tick_gap(key, self.provider_minutes[key])
@@ -273,7 +318,16 @@ class PushSession:
             return True
         ts = int(t.timestamp() * 1000)
         close, cash = provider.number(msg.get("last")), provider.number(msg.get("total_turnover"))
-        self.tick_minutes.add(symbol, t, close, cash)
+        accepted = self.tick_minutes.add(symbol, t, close, cash)
+        self.journal.append('tick', symbol, iso_utc(t), received,
+                                {'last': close, 'total_turnover': cash, 'accepted': accepted,
+                                 'volume': provider.number(msg.get('volume')),
+                                 'iopv': provider.number(msg.get('iopv')),
+                                 'ask': [provider.number(v) for v in msg.get('ask') or [msg.get('a1')]],
+                                 'bid': [provider.number(v) for v in msg.get('bid') or [msg.get('b1')]]})
+        if accepted and self.detector and symbol in self.symbols:
+            self.second_candidates[symbol] = tick_candidates(
+                self.tick_minutes, self.detector.baseline, self.tick_references, symbol, t)
         if symbol in BASKET + [INDEX] and close and close > 0 and (symbol == INDEX or cash is not None and cash >= 0) and ts > self.quotes.get(symbol, (0,))[0]:
             if symbol != INDEX and symbol in self.quotes and cash < self.quotes[symbol][2]:
                 return False
@@ -354,13 +408,31 @@ class PushSession:
         report["feed"] = "push"
         report["baseline_ready"] = self.baseline_ready
         report["candidates"] = self.candidates(now)
+        report['tick_candidates'] = [c for rows in self.second_candidates.values() for c in rows
+                                     if 0 <= (now - datetime.fromisoformat(c['observed_at'])).total_seconds() <= 10]
+        report['tick_factor_status'] = {'state': self.tick_reference_status, 'version': FACTOR_VERSION,
+                                        'covered': len(self.tick_references), 'expected': len(self.symbols)}
+        states = {(c['symbol'], c.get('method', 'aligned')): c
+                  for c in report['candidates'] + report['tick_candidates']}
+        for key, candidate in states.items():
+            if candidate != self.candidate_states.get(key):
+                self.journal.append('candidate', key[0], candidate['as_of'], iso_utc(now), candidate)
+        for key in self.candidate_states.keys() - states.keys():
+            self.journal.append('candidate_removed', key[0], iso_utc(now), iso_utc(now), {'method': key[1]})
+        self.candidate_states = states
+        for event in self.detector.events:
+            end = datetime.fromisoformat(self.day + 'T' + event['last']).replace(tzinfo=provider.CHINA)
+            if event['id'] not in self.ended_events and now > end + timedelta(minutes=11, seconds=2):
+                self.journal.append('end', event['symbol'], iso_utc(end), iso_utc(now), {'event_id': event['id']})
+                self.ended_events.add(event['id'])
+        self.journal.commit()
+        report['journal'] = {'enabled': True, 'format': 'sqlite-append-v1'}
         report["tick_monitor"] = self.tick_comparison()
         signature = json.dumps({key: value for key, value in report.items() if key != "updated_at"})
         if signature != self.last_report:
             publish(self.burst_path, report)
             archive = self.burst_path.parent / "sessions" / f"{self.day}.json"
-            if not archive.exists() or report["events"]:
-                publish(archive, report)
+            publish(archive, report)
             self.last_report = signature
         if self.minute_version != len(self.minutes):
             self.board = live_snapshot({"calendar": self.calendar, "previous": self.previous,
@@ -419,6 +491,8 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_dri
         client = None
         try:
             if session is None or session.day != day:
+                if session:
+                    session.journal.close()
                 session = PushSession(api, day, funds, path, burst_dir, q, symbols, minute_driver)
             if not session.detector:
                 continue
@@ -482,6 +556,7 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_dri
                 if not continuous and monotonic() - connected >= 75:
                     if pending:
                         session.flush()
+                    session.journal.close()
                     return
             if pending:
                 session.flush()
