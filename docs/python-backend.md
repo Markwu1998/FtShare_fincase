@@ -4,10 +4,11 @@
 
 ## 本地启动
 
-在项目根目录建立 Python 虚拟环境，执行 `python -m pip install -r requirements-python.txt`。Windows 可将该环境的解释器路径设为 `ETF_BACKEND_PYTHON`。启动脚本也支持现有的 RQData 本机加密凭据配置。采集前按 [RQData 配置](rqdata-market.md) 设置本地配置文件，启用雷达时请提供至少 60 个完整的历史分钟日。
+在项目根目录建立 Python 虚拟环境，执行 `python -m pip install -r requirements-python.txt`。Windows 可将该环境的解释器路径设为 `ETF_BACKEND_PYTHON`。采集前按[首次安装](operations.md#2-首次安装一次性)配置 RQData 凭据和数据路径。逐只 ETF 雷达的采集器独立取前 60 个交易日的参考数据，网页历史分钟样本由 `minute_days` 单独配置。
 
 ```powershell
 $env:DATA_MODE = 'live'
+$env:ENABLE_RADAR = '1'
 # 采集历史，输出到 .env 配置的历史快照路径
 & .\scripts\python-backend.ps1 history
 # 网页默认在 8080，可由 PORT 或 .env 覆盖
@@ -52,7 +53,7 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 
 拥挤度本身按模块增量更新：日度重查最近 5 个已归档交易日，行业/公募/融资各自维护独立文件。
 
-体量参考（362 只 ETF，2025-01 起）：快照约 1.0 MB，其中分钟样本 0.43 MB、分类合计 0.17 MB、规模/折溢价 0.30 MB；每个交易日新增约 1.1 KB（约 0.26 MB/年）。盘中缓存约 18 KB（每轮覆盖），逐 ETF 放量归档约 7 KB/交易日。
+主动成交专题对照读取 `data/private/etf-flow-comparison.json`，可独立导入和热加载。快照、Tick 输入与 SQLite 日志的容量参考见[运维手册](operations.md#42-容量)。
 
 ### 收盘补全
 
@@ -78,7 +79,9 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 
 采集器为常驻进程：09:15 自动切换新交易日，15:02 后空闲；每天写 `data/private/collector.heartbeat`，`start-collector.cmd` 依据心跳避免重复启动。日常状态用 `status.cmd` 查看。
 
-生成指定日期的回放示例。
+## 回放入口
+
+以下命令生成指定日期的分时面板缓存。
 
 ```powershell
 & .\scripts\python-backend.ps1 -Mode live -Arguments @('--replay=2026-11-13','--cache=.local/python-rqdata-replay.json')
@@ -90,13 +93,17 @@ Windows 可直接用 `& .\scripts\python-backend.ps1 web -ReplayCache '.local/py
 & .\scripts\python-backend.ps1 -Mode burst-replay -Arguments @('--start=2026-11-12','--end=2026-11-13')
 ```
 
-Linux 对应命令为 `python -m etf_backend.collect burst-replay --end=2026-11-13`。已有 RQData 成交额导出时，可以用 `--burst-input` 离线回放。输入必须包含 `schema_version:2`、`metric:"turnover"`、`unit:"CNY"`，以及 `1m` 和 `1d` 两组 `[symbol, date, slot, amount]`；`amount` 为元，分钟与日线必须同口径。旧成交量导出和无版本归档拒绝按成交额使用，须从已确认的成交额原始数据重新生成，不能仅改旧文件标签。采集和网页共用 `ETF_BURST_DIR`。默认参数在 `config/etf-burst.json`，自定义文件通过 `ETF_BURST_CONFIG` 或 `--burst-config` 指定。实时和历史快照分目录保存，历史日期和事件接口为 `/api/etf-burst/dates` 和 `/api/etf-burst?date=YYYY-MM-DD`。实时事件接口为 `/api/etf-burst/stream`；行情流 `/api/live/stream` 与其独立，代理均须关闭 SSE 响应缓冲。详细口径见 [盘中放量研究](etf-intraday-burst-research.md)。
+Linux 对应命令为 `python -m etf_backend.collect burst-replay --end=2026-11-13`。已有 RQData 成交额导出时，可以用 `--burst-input` 离线回放。输入包含 `schema_version:2`、`metric:"turnover"`、`unit:"CNY"`，以及 `1m` 和 `1d` 两组 `[symbol, date, slot, amount]`。`amount` 为元，分钟与日线须同口径。采集和网页共用 `ETF_BURST_DIR`。默认参数在 `config/etf-burst.json`，自定义文件通过 `ETF_BURST_CONFIG` 或 `--burst-config` 指定。详细口径见[盘中放量研究](etf-intraday-burst-research.md)。
+
+需要单日 ETF 和期货 Tick 同窗、日末申赎与 SQLite 日志时使用 `day-replay`。Windows 包装器、跨平台 Python 命令和离线输入见 [Tick 数据回放](tick-driver.md#tick-数据回放)。当前联网 Tick 使用 RQData，DDB 支持日频构建。
+
+日度主动成交对照面板从独立专题 CSV 导入。筛选与操作见[日度对照操作](operations.md#35-日度主动成交与申赎对照)。
 
 ## API 与部署
 
 盘中异动还支持 Tick 本地聚合、分钟内候选和供应商 bar 并行验证。默认 `config/etf-burst.json` 的 `minute_driver="provider"` 保留原正式确认来源，独立验证后可配置为 `tick`。新增 Tick 导出回放及归档隔离方式见 [Tick 驱动异动监控](tick-driver.md)。
 
-现有网页使用 `/api/health`、`/api/board`、`/api/history`、`/api/live` 和 `/api/cumulative`，另含 `/api/crowding*`、`/api/etf-burst*`。浏览器继续执行分钟回放和交互绘图。API 和采集器都能在无 Node.js 环境运行。部署与日常运维见 [运维手册](operations.md)。
+现有网页使用 `/api/health`、`/api/board`、`/api/history`、`/api/live` 和 `/api/cumulative`，另含 `/api/crowding*`、`/api/etf-burst*` 和 `/api/etf-flow-comparison`。雷达历史使用 `/api/etf-burst/dates`、`/api/etf-burst?date=YYYY-MM-DD` 和日志接口。实时事件 SSE `/api/etf-burst/stream` 与行情 SSE `/api/live/stream` 应关闭反向代理缓冲。API 与采集器运行在 Python 环境，浏览器负责交互绘图。部署与日常运维见[运维手册](operations.md)。
 
 部署目标可以是另一台 Windows 电脑、Windows/Linux 服务器，或腾讯云 CVM。腾讯云 CVM 可选 Windows Server 或 Linux，采集调度方式随操作系统选择。单机部署可把采集器和 Uvicorn 作为不同进程运行，并通过同一数据目录共享快照。容器多实例部署需要共享存储，并应把采集任务部署到独立的常驻或定时运行环境。 [腾讯云 CVM 镜像列表](https://cloud.tencent.com/document/product/213/93093)
 

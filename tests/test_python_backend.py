@@ -50,6 +50,34 @@ class BackendTests(unittest.TestCase):
             self.assertTrue(json.loads(request("api/etf-burst", b"date=2026-11-13").body)["replay"])
             self.assertEqual(request("api/etf-burst", b"date=../live").status_code, 400)
 
+    def test_flow_comparison_keeps_missing_flows_and_serves_only_live_mode(self):
+        from starlette.requests import Request
+        from etf_backend.flow_comparison import import_rows, validate_archive
+        from etf_backend.web import create_app
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.csv"
+            header = "day,symbol,gross_yi,active_buy_yi,active_sell_yi,net_flow_yi,flow_issues\n"
+            lines = [f"2026-11-20,{symbol},8,5,2,,share_missing\n" if i == 0
+                     else f"2026-11-20,{symbol},0,0,0,-1,\n" for i, symbol in enumerate(BASKET)]
+            source.write_text(header + "".join(lines), encoding="utf-8-sig")
+            archive = import_rows(source)
+            first = next(row for row in archive["rows"] if row["symbol"] == BASKET[0])
+            self.assertEqual((first["active_buy_yi"], first["active_sell_yi"], first["net_flow_yi"]), (5, 2, None))
+            snapshot = root / "flow.json"
+            publish(snapshot, archive)
+
+            def request(app):
+                endpoint = next(r.endpoint for r in app.routes if r.path == "/{path:path}")
+                path = "api/etf-flow-comparison"
+                return endpoint(path, Request({"type": "http", "path": f"/{path}", "query_string": b"", "headers": []}))
+
+            self.assertEqual(json.loads(request(create_app("live", flow_comparison_file=snapshot)).body), archive)
+            self.assertEqual(request(create_app("demo", flow_comparison_file=snapshot)).status_code, 503)
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                validate_archive({**archive, "rows": archive["rows"] + [first]})
+
     def test_push_updates_existing_board_and_separate_burst_archive(self):
         from datetime import datetime, timedelta
         from unittest.mock import patch

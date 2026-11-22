@@ -7,3 +7,5 @@
 - macOS 可用 LaunchAgents 管理只读网页和日度刷新。见 [macOS](macmini.md)。
 
 Windows 使用 `scripts/python-backend.ps1` 启动网页或采集。Linux 可直接运行 Uvicorn 和 Python 采集模块。日常启动、定时任务、健康检查与故障处理见[运行与运维手册](operations.md)。
+
+跨机器迁移时，按数据授权迁移日频与拥挤度快照、`ETF_BURST_DIR` 归档，以及 `data/private/etf-flow-comparison.json` 专题快照。Windows 本机加密凭据在目标机器重新配置。`live` 模式应分别核验 `/api/board` 与 `/api/etf-flow-comparison` 的可用性；专题快照的口径和导入见[日度对照操作](operations.md#35-日度主动成交与申赎对照)。

@@ -1,4 +1,4 @@
-import { fundStartDate, cumulativeWindow, cumulativeExcess, FLOW_ISSUE_LABELS } from './flow-math.js';
+import { fundStartDate, cumulativeWindow, cumulativeExcess, FLOW_ISSUE_LABELS, summarizeFlowComparison, groupFlowComparison } from './flow-math.js';
 import { createRadar } from './radar.js';
 import { chooseSources, sourceOption, withSourceQuery, escapeHtml as escape } from './data-source.js';
 (async function(){
@@ -487,7 +487,83 @@ function tick(){
  else tag('tagCountdown',(trading?'盘中':'非交易时段')+' · '+Math.max(0,remaining)+'秒后读取缓存');
  if(remaining<=0){remaining=trading?60:300;refresh();}
 }
+async function loadFlowComparison(){
+ if(document.documentElement.dataset.dataMode!=='live')return;
+ const panel=$('flowComparison');
+ panel.hidden=false;
+ $('flowComparisonLink').hidden=false;
+ if(location.hash==='#flowComparison')requestAnimationFrame(()=>panel.scrollIntoView({block:'start',behavior:'instant'}));
+ const status=$('flowComparisonStatus');
+ let archive;
+ try{archive=await rawGet('/api/etf-flow-comparison');}
+ catch{status.textContent='暂无盘口回放对照数据。';return;}
+ const rows=archive.rows;
+ const dates=rows.map(row=>row.day).sort();
+ const start=$('flowCompareStart'),end=$('flowCompareEnd'),symbol=$('flowCompareSymbol');
+ const first=dates[0],last=dates[dates.length-1];
+ for(const input of [start,end]){input.min=first;input.max=last;}
+ start.value=first;end.value=last;
+ for(const code of [...new Set(rows.map(row=>row.symbol))].sort())symbol.add(new Option(code,code));
+ let view='detail',page=0;
+ const pageSize=20,buttons=[...$('flowCompareViews').querySelectorAll('button')];
+ const money=(value,signed=false)=>Number.isFinite(value)?(signed?sign(value):fmt(value)):'—';
+ const cells=(buy,sell,flow,gap)=>[buy,sell,flow,gap].map((value,i)=>{
+  const color=i>=2?(value>0?' up':value<0?' down':''):'';
+  return '<td class="num'+color+'">'+money(value,i>=2)+'</td>';
+ }).join('');
+ function render(){
+  const from=start.value||first,to=end.value||last;
+  const selected=rows.filter(row=>row.day>=from&&row.day<=to&&(!symbol.value||row.symbol===symbol.value));
+  const summary=summarizeFlowComparison(selected);
+  const summaryText=$('flowCompareSummary');
+  summaryText.classList.toggle('has-gaps',summary.paired!==summary.total);
+  summaryText.textContent=from>to?'开始日期须早于或等于结束日期。':selected.length
+   ?'区间配对 '+summary.paired+'/'+summary.total+' 条 · 主动买 '+money(summary.buy)+' · 主动卖 '+money(summary.sell)
+     +' · 净申赎 '+money(summary.flow,true)+' · 差额 '+money(summary.gap,true)+'（亿元）'
+   :'所选区间没有交易记录。';
+  const detail=view==='detail';
+  const list=detail?selected.sort((a,b)=>b.day.localeCompare(a.day)||a.symbol.localeCompare(b.symbol))
+   :groupFlowComparison(selected,view).sort((a,b)=>view==='day'?b.label.localeCompare(a.label):a.label.localeCompare(b.label));
+  const pages=Math.ceil(list.length/pageSize);
+  page=Math.min(page,Math.max(0,pages-1));
+  const body=list.slice(page*pageSize,(page+1)*pageSize).map(row=>{
+   if(!detail)return '<tr><td>'+escape(row.label)+'</td>'+cells(row.buy,row.sell,row.flow,row.gap)
+    +'<td class="num">'+row.paired+'/'+row.total+'</td></tr>';
+   const buy=row.active_buy_yi,sell=row.active_sell_yi,flow=row.net_flow_yi;
+   const gap=Number.isFinite(buy)&&Number.isFinite(flow)?buy-flow:null;
+   const issues=[];
+   if(!Number.isFinite(buy))issues.push('盘口数据缺失');
+   if(!Number.isFinite(flow))issues.push(...(row.flow_issues||'source_missing').split(';').map(key=>FLOW_ISSUE_LABELS[key]||'净申赎缺失'));
+   return '<tr><td>'+escape(row.day)+'</td><td>'+escape(row.symbol)+'</td>'+cells(buy,sell,flow,gap)
+    +'<td>'+escape(issues.join('、')||(row.gross_yi===0?'无确认放量':'完整'))+'</td></tr>';
+  }).join('');
+  const headers=[...(detail?['交易日','ETF 标的']:view==='day'?['交易日']:['ETF 标的']),
+   '盘中主动买成交额','盘中主动卖成交额','日末净申赎','差额（买 − 净申赎）',detail?'数据状态':'有效配对 / 记录数'];
+  $('flowCompareTable').innerHTML='<thead><tr>'+headers.map((name,i)=>'<th scope="col"'
+   +(i>=(detail?2:1)&&(!detail||i<headers.length-1)?' class="num"':'')+'>'+name+'</th>').join('')
+   +'</tr></thead><tbody>'+body+'</tbody>';
+  $('flowComparePages').hidden=pages<2;
+  $('flowComparePage').textContent=(page+1)+' / '+pages;
+  $('flowComparePrev').disabled=page===0;
+  $('flowCompareNext').disabled=page+1>=pages;
+ }
+ const resetPage=()=>{page=0;render();};
+ for(const input of [start,end,symbol])input.addEventListener('change',resetPage);
+ $('flowCompareReset').addEventListener('click',()=>{start.value=first;end.value=last;symbol.value='';resetPage();});
+ for(const button of buttons)button.addEventListener('click',()=>{
+  view=button.dataset.view;
+  for(const item of buttons)item.setAttribute('aria-pressed',String(item===button));
+  resetPage();
+ });
+ $('flowComparePrev').addEventListener('click',()=>{page--;render();});
+ $('flowCompareNext').addEventListener('click',()=>{page++;render();});
+ status.textContent='数据范围 '+first+' 至 '+last+'。汇总按主动买卖及净申赎均有效的标的日配对。';
+ $('flowComparisonData').hidden=false;
+ render();
+}
+
 window.addEventListener('ftshare:theme-change',()=>{if(!seed)return;safely('主题切换',renderDaily);if(live)safely('实时图表',renderMinute);safely('累计图表',renderCum);});
+void loadFlowComparison();
 try{
  try{sourceCatalog=await rawGet('/api/sources');}catch{sourceCatalog={sources:[],realtime_sources:[],default:'rqdata',realtime_default:'rqdata'};}
  const selection=chooseSources(sourceCatalog,location.search,localStorage.getItem('ftshare-daily-source'),localStorage.getItem('ftshare-realtime-source'));

@@ -28,16 +28,17 @@
  document.getElementById('chartNavClose').addEventListener('click',()=>{closeNav();navToggle.focus();});backdrop.addEventListener('click',closeNav);
  window.addEventListener('resize',()=>{if(window.innerWidth>=1200)closeNav();});
  const directoryLinks=[...document.querySelectorAll('.chart-directory a:not(.directory-section)')];
+ const directoryTargets='.chart, #chart, #radar, #flowComparison';
  function activateChart(id){for(const a of directoryLinks){const active=a.hash==='#'+id;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');}}
  const navLinks=[...document.querySelectorAll('.nav-sections>a')];
  function activate(section){for(const a of navLinks){const active=a.hash==='#'+section.id;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');}}
  function openTarget(hash,scroll=false){
   const target=document.getElementById(hash.slice(1));if(!target)return;const section=target.closest('.part');
-  if(section){setCollapsed(section,false);activate(section);}else if(target.id==='radar')activate(target);if(target.matches('.chart, #chart, #radar'))activateChart(target.id);if(scroll)requestAnimationFrame(()=>target.scrollIntoView({block:'start',behavior:'instant'}));
+  if(section){setCollapsed(section,false);activate(section);}else if(target.id==='radar')activate(target);if(target.matches(directoryTargets))activateChart(target.id);if(scroll)requestAnimationFrame(()=>target.scrollIntoView({block:'start',behavior:'instant'}));
  }
  for(const a of document.querySelectorAll('a[href^="#"]'))a.addEventListener('click',event=>{event.preventDefault();const hash=a.hash;closeNav();openTarget(hash,true);history.replaceState(null,'',hash);});
  window.addEventListener('hashchange',()=>openTarget(location.hash,true));
- if('IntersectionObserver'in window){const observer=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)activate(entry.target);},{rootMargin:'-15% 0px -60% 0px'});[...sections,...document.querySelectorAll('#radar')].forEach(s=>observer.observe(s));const chartObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)activateChart(entry.target.id);},{rootMargin:'-15% 0px -50% 0px'});document.querySelectorAll('.chart, #chart, #radar').forEach(c=>chartObserver.observe(c));}
+ if('IntersectionObserver'in window){const observer=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)activate(entry.target);},{rootMargin:'-15% 0px -60% 0px'});[...sections,...document.querySelectorAll('#radar')].forEach(s=>observer.observe(s));const chartObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)activateChart(entry.target.id);},{rootMargin:'-15% 0px -50% 0px'});document.querySelectorAll(directoryTargets).forEach(c=>chartObserver.observe(c));}
  if(location.hash)openTarget(location.hash);else if(root.dataset.radar==='on')activate(document.getElementById('radar'));else if(sections[0])activate(sections[0]);
  document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeNav();if(window.innerWidth<1200)navToggle.focus();}});
 })();

@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from websockets.sync.client import connect
 from etf_backend.collect import ROOT, publish, read
+from etf_backend.flow_comparison import METHOD
 from etf_backend.model import BASKET, INDEX, SLOTS
 from etf_backend.provider import CHINA
 from etf_backend.realtime import PushSession
@@ -65,8 +66,16 @@ def main():
         if real_replay.is_file():
             (root / "burst/replay").mkdir(parents=True, exist_ok=True)
             shutil.copyfile(real_replay, root / "burst/replay/2026-10-21.json")
+        comparison = root / "flow-comparison.json"
+        publish(comparison, {"schema_version": 1, "method": METHOD, "unit": "CNY_1e8", "rows": [
+            {"day": date, "symbol": symbol, "gross_yi": 10, "active_buy_yi": 6, "active_sell_yi": 2,
+             "net_flow_yi": None if date == "2026-11-20" and i == 0 else -2,
+             "flow_issues": "share_missing" if date == "2026-11-20" and i == 0 else ""}
+            for date in ("2026-11-19", "2026-11-20") for i, symbol in enumerate(BASKET)
+        ]})
         app = create_app("live", seed_file=root / "seed.json", cache_file=root / "live.json",
-                         burst_dir=root / "burst", crowding_file=root / "crowding.json", radar=True)
+                         burst_dir=root / "burst", crowding_file=root / "crowding.json", radar=True,
+                         flow_comparison_file=comparison)
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
         server = uvicorn.Server(config)
         sock = config.bind_socket()
@@ -117,6 +126,18 @@ def main():
                 call("Log.enable")
                 call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
                 wait("window.__ETF_APP_READY===true")
+                wait("document.getElementById('flowCompareSummary').textContent.includes('39/40')")
+                wait("document.querySelectorAll('#flowCompareTable tbody tr').length", 20)
+                evaluate("document.getElementById('flowCompareNext').click()")
+                wait("document.querySelector('#flowCompareTable tbody tr td').textContent", "2026-11-19")
+                evaluate("document.getElementById('flowCompareStart').value='2026-11-20';document.getElementById('flowCompareStart').dispatchEvent(new Event('change'))")
+                wait("document.getElementById('flowCompareSummary').textContent.includes('19/20')")
+                evaluate("document.querySelector('#flowCompareViews [data-view=day]').click()")
+                wait("document.querySelector('#flowCompareTable tbody tr').textContent", "2026-11-20114.0038.00-38.00+152.0019/20")
+                evaluate("document.querySelector('#flowCompareViews [data-view=symbol]').click()")
+                wait("document.querySelectorAll('#flowCompareTable tbody tr').length", 20)
+                evaluate("document.getElementById('flowCompareReset').click()")
+                wait("document.getElementById('flowCompareSummary').textContent.includes('39/40')")
                 assert evaluate("document.querySelector('#realtimeSourceMenu [data-source=\"rqdata\"]').disabled")
                 for symbol in BASKET + [INDEX]: tick(symbol)
                 session.flush()

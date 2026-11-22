@@ -21,7 +21,7 @@
     <div class="directory-group" data-radar-link hidden><a class="radar-directory" href="#radar">ETF异动雷达</a></div>
     <div class="directory-group"><a class="directory-section" href="#part1">盘中交易</a><a href="#chart">分钟成交与指数</a><a href="#chartCum">累计成交对比</a><a href="#chartTypCase">放量日分钟结构</a><a href="#chartTypNorm">常态日分钟结构</a></div>
     <div class="directory-group"><a class="directory-section" href="#part2">放量信号</a><a href="#chartAmt">放量日成交额</a><a href="#chartNf">放量日净申购</a></div>
-    <div class="directory-group"><a class="directory-section" href="#part3">历史资金</a><a href="#chartDAmt">历史成交额</a><a href="#chartDNf">历史净申购</a><a href="#chartBroad">宽基净流入与累计</a></div>
+    <div class="directory-group"><a class="directory-section" href="#part3">历史资金</a><a href="#chartDAmt">历史成交额</a><a href="#chartDNf">历史净申购</a><a href="#flowComparison" id="flowComparisonLink" hidden>主动成交与净申赎</a><a href="#chartBroad">宽基净流入与累计</a></div>
   </nav>
   <a class="sidebar-top" href="#top">返回概览 <span>↑</span></a>
 </aside>
@@ -204,6 +204,31 @@
         </dl></div>
       </details>
 </section>
+    <section class="table-wrap flow-comparison" id="flowComparison" aria-labelledby="flowComparisonTitle" hidden>
+      <h2 id="flowComparisonTitle">ETF 盘中主动成交与日末净申赎</h2>
+      <p class="data-note">RQData 历史回放 · 金额单位为亿元 · 仅统计确认放量窗口。主动买卖按盘口估算，差额为主动买减日末净申赎。</p>
+      <p id="flowComparisonStatus" class="data-note" role="status">正在读取复盘数据…</p>
+      <div id="flowComparisonData" hidden>
+        <div class="broad-controls" aria-label="主动成交对照筛选条件">
+          <label>开始日期 <input id="flowCompareStart" type="date"></label>
+          <label>结束日期 <input id="flowCompareEnd" type="date"></label>
+          <label>ETF 标的 <select id="flowCompareSymbol"><option value="">全部标的</option></select></label>
+          <button type="button" id="flowCompareReset">重置筛选</button>
+        </div>
+        <p id="flowCompareSummary" class="coverage-note" aria-live="polite"></p>
+        <div class="broad-views" id="flowCompareViews" role="group" aria-label="主动成交对照视图">
+          <button type="button" data-view="detail" aria-pressed="true">每日明细</button>
+          <button type="button" data-view="symbol" aria-pressed="false">按标的汇总</button>
+          <button type="button" data-view="day" aria-pressed="false">按日期汇总</button>
+        </div>
+        <div class="tscroll" tabindex="0" aria-label="主动成交与净申赎对照表"><table id="flowCompareTable"></table></div>
+        <div class="flow-compare-pages" id="flowComparePages" hidden>
+          <button id="flowComparePrev" type="button">上一页</button>
+          <span id="flowComparePage" class="data-note" aria-live="polite"></span>
+          <button id="flowCompareNext" type="button">下一页</button>
+        </div>
+      </div>
+    </section>
     <div class="sub data-note" id="universeText"></div>
     <div class="status"><span class="tag" id="tagBroad">分类资金加载中</span></div>
     <div class="broad-views" role="group" aria-label="日度资金全景视图">

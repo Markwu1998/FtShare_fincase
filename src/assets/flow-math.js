@@ -33,3 +33,25 @@ export const FLOW_ISSUE_LABELS={
   split_evidence_missing:'折算证据与独立净申赎对账缺失',
   source_missing:'日度记录未取得'
 };
+
+export function summarizeFlowComparison(rows) {
+  let buy=0, sell=0, flow=0, paired=0;
+  for (const row of rows) {
+    if (![row.active_buy_yi,row.active_sell_yi,row.net_flow_yi].every(Number.isFinite)) continue;
+    buy+=row.active_buy_yi;
+    sell+=row.active_sell_yi;
+    flow+=row.net_flow_yi;
+    paired++;
+  }
+  return { buy:paired?buy:null, sell:paired?sell:null, flow:paired?flow:null,
+    gap:paired?buy-flow:null, paired, total:rows.length };
+}
+
+export function groupFlowComparison(rows, key) {
+  const groups=new Map();
+  for (const row of rows) {
+    if (!groups.has(row[key])) groups.set(row[key],[]);
+    groups.get(row[key]).push(row);
+  }
+  return [...groups].map(([label,members])=>({label,...summarizeFlowComparison(members)}));
+}

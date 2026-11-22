@@ -19,6 +19,7 @@ from .burst_ledger import read_journal
 from .collect import ROOT, read
 from .crowding import DEFAULT_PATH as CROWDING_PATH, validate_snapshot as validate_crowding
 from .crowding_extra import MODULES, path_for, validate_extra
+from .flow_comparison import DEFAULT_PATH as FLOW_COMPARISON_PATH, validate_archive as validate_flow_comparison
 from .model import BASKET, CATEGORIES, DEFAULT_STATUS, FORMULA, SLOTS, finite
 from .provider import CHINA
 from .sources import load_config as load_source_config, realtime_entries, source_descriptions, source_entries
@@ -133,7 +134,7 @@ def validate_burst(value):
 
 
 def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_replay=None, crowding_file=None,
-               burst_dir=None):
+               burst_dir=None, flow_comparison_file=None):
     mode = mode or os.environ.get("DATA_MODE", "demo")
     if mode not in {"demo", "live"}:
         raise ValueError("Invalid DATA_MODE")
@@ -178,6 +179,7 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                         for module in MODULES}
     event_dir = ROOT / (burst_dir or os.environ.get("ETF_BURST_DIR") or BURST_DIR)
     events = Archive(event_dir / "live.json", validate_burst)
+    flow_comparison = Archive(ROOT / (flow_comparison_file or FLOW_COMPARISON_PATH), validate_flow_comparison)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     index = (ROOT / "src/index.html").read_text(encoding="utf-8").replace(
         'data-data-mode="demo"', f'data-data-mode="{mode}"').replace(
@@ -401,6 +403,9 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             else:
                 snapshot = current_events()
             return response(snapshot) if snapshot else error("暂无盘中放量归档", "burst_not_ready", 503)
+        if key == "/api/etf-flow-comparison":
+            value = None if demo else flow_comparison.load()
+            return response(value) if value is not None else error("盘中主动买与日末申赎尚未归档", "flow_comparison_not_ready", 503)
         if key.startswith("/api/crowding/"):
             module = key.removeprefix("/api/crowding/")
             if module not in crowding_modules:
