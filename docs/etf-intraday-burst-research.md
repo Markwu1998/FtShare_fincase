@@ -1,5 +1,7 @@
 # ETF 盘中放量监控研究与开发
 
+单日 ETF 与股指期货 Tick 复盘见[运维手册](operations.md#34-单日-etf-异动复盘)，输入与计算详见 [Tick 数据回放](tick-driver.md#tick-数据回放)。新增盘中指标时，按[单日复盘维护要求](../CONTRIBUTING.md#单日复盘维护)同步更新回放、归档和验证。
+
 > 2026-11-16 起，当前实现改为**成交额口径**（RQData `total_turnover`），监控范围与日度核心篮子统一为同一 20 只（`config/basket.json`，`config/etf-burst.json` 可单独覆盖 `symbols`）；同窗分位参数为 `amount_window_quantile=0.75`，全天基准仍取中位数。阈值倍数与占比规则沿用旧值，尚不能据此认定成交量研究的效果已在成交额口径复现。
 >
 > 下文 v1–v3 的 `volume_window_quantile`、387/157 等统计及验收记录均属于旧成交量版本，不代表当前成交额版本的验收。当前代码审查和待补验证见 [合并审查](merge-review-20261119.md)。

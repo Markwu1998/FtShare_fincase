@@ -400,7 +400,8 @@ def main():
             live_run(rqdatac, universe["funds"], args.cache, args.replay)
         else:
             from .realtime import watch
-            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch, symbols, minute_driver)
+            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch, symbols, minute_driver,
+                  futures_enabled=burst_config.get("futures_evidence", False) is True)
     except Exception as error:
         if os.environ.get("ETF_DEBUG") == "1":
             import traceback

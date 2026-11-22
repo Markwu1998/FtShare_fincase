@@ -61,6 +61,10 @@ def main():
             (root / "burst/replay").mkdir(parents=True)
             for archive in historical.glob("????-??-??.json"):
                 shutil.copyfile(archive, root / "burst/replay" / archive.name)
+        real_replay = ROOT / ".local/day-replay-offline-ih/replay/2026-10-21.json"
+        if real_replay.is_file():
+            (root / "burst/replay").mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(real_replay, root / "burst/replay/2026-10-21.json")
         app = create_app("live", seed_file=root / "seed.json", cache_file=root / "live.json",
                          burst_dir=root / "burst", crowding_file=root / "crowding.json", radar=True)
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -157,6 +161,36 @@ def main():
                 wait('window.__journalOK===true')
                 assert evaluate("document.getElementById('burstEvents').children.length") == 0
                 assert evaluate("window.__spoken") == spoken_before_candidate
+                futures_report = {**candidate_report, "futures_monitor": {"state": "receiving", "products": ["IF"]}}
+                futures_report["updated_at"] = datetime.now(CHINA).isoformat()
+                signal = {"level": 2, "window": 5, "start": "09:31", "end": "09:35",
+                          "amount": 1e8, "ratios": [6, 7], "daily": [.15, .16]}
+                futures_report["events"] = [{"id": day + "/futures-smoke", "symbol": BASKET[0], "level": 2,
+                    "first": "09:35", "last": "09:35", "peak": signal, "updates": [signal],
+                    "evidence": {"futures": {"product": "IF", "status": "sell_side_evidence",
+                        "window_start": "09:31", "window_end": "09:35", "etf_turnover_cny": 1e8,
+                        "etf_volume_shares": 80000, "net_oi_cny": 9e7, "estimated_sell_cny": 8e7,
+                        "estimated_sell_oi_cny": 6e7, "classified_share": .65, "covered": 4, "expected": 4,
+                        "directions": {"sell": {"oi_decrease_cny": -2e7}},
+                        "contracts": [{"code": "IF2612", "tenor": "次近月", "values": {
+                            "delta_oi": 20, "net_oi_cny": 9e7, "estimated_sell_cny": 8e7, "estimated_sell_oi_cny": 6e7,
+                            "directions": {"sell": {"oi_decrease_cny": -1e7}}}}]}}}]
+                publish(root / "burst/live.json", futures_report)
+                wait("!!document.querySelector('.radar-futures-detail')")
+                evaluate("document.querySelector('.radar-futures-detail summary').click()")
+                assert evaluate("document.querySelector('.radar-futures-detail[open]').textContent.includes('主动卖成交额估算 0.80 亿')")
+                assert evaluate("document.querySelector('.radar-futures-detail[open]').textContent.includes('IF2612')")
+                evaluate("document.getElementById('futuresMetric').value='sell.oi_decrease_cny';document.getElementById('futuresMetric').dispatchEvent(new Event('change'))")
+                assert evaluate("document.querySelector('.radar-futures-detail[open]').textContent.includes('卖侧区间持仓减少额 -0.20 亿')")
+                assert evaluate("document.querySelector('.radar-futures-detail[open] li').textContent.includes('-0.10 亿')")
+                assert evaluate("document.getElementById('futuresColumn').textContent") == '卖侧区间持仓减少额'
+                evaluate("document.getElementById('futuresMetric').value='estimated_sell_oi_cny';document.getElementById('futuresMetric').dispatchEvent(new Event('change'))")
+                assert evaluate("document.querySelector('.radar-futures-detail[open]').textContent.includes('卖侧增仓估算额（成交均价） 0.60 亿')")
+                evaluate("document.getElementById('futuresMetric').value='estimated_sell_cny';document.getElementById('futuresMetric').dispatchEvent(new Event('change'));document.getElementById('futuresMetric').scrollIntoView({block:'center',behavior:'instant'})")
+                metrics_screenshot = ROOT / '.local/futures-metric-smoke.png'
+                metrics_screenshot.write_bytes(base64.b64decode(call('Page.captureScreenshot', {'format':'png'})['data']))
+                publish(root / "burst/live.json", {**candidate_report, "updated_at": datetime.now(CHINA).isoformat()})
+                wait("document.getElementById('burstEvents').children.length===0")
                 evaluate("document.getElementById('tickFactorCandidates').scrollIntoView({block:'center',behavior:'instant'});document.body.insertAdjacentHTML('beforeend','<div id=\"__synthetic\" style=\"position:fixed;bottom:0;left:0;z-index:99999;background:#fff5cf;padding:8px\">离线合成验收 · 非真实成交或告警</div>')")
                 upgrade_screenshot = ROOT / '.local/tick-burst-upgrade-ui.png'
                 upgrade_screenshot.write_bytes(base64.b64decode(call('Page.captureScreenshot', {'format': 'png'})['data']))
@@ -198,6 +232,14 @@ def main():
                     evaluate("document.getElementById('burstTime').value='09:34';document.getElementById('burstTime').dispatchEvent(new Event('change'))")
                     wait("document.getElementById('burstCandidates').textContent.includes('暂无 Tick 候选')")
                     history_checked = True
+                if real_replay.is_file():
+                    evaluate("document.getElementById('burstTime').value='14:55';document.getElementById('burstDate').value='2026-10-21';document.getElementById('burstDate').dispatchEvent(new Event('change'))")
+                    wait("document.getElementById('futuresStatus').textContent.includes('按行情时间重建')")
+                    assert not evaluate("!!document.querySelector('.radar-futures-detail')")
+                    evaluate("document.getElementById('burstTime').value='14:56';document.getElementById('burstTime').dispatchEvent(new Event('change'))")
+                    wait("document.querySelector('.radar-futures-detail summary')?.textContent.includes('IH · 4.02 亿')")
+                    evaluate("document.getElementById('burstTime').value='15:00';document.getElementById('burstTime').dispatchEvent(new Event('change'))")
+                    wait("document.querySelector('.radar-futures-detail summary')?.textContent.includes('IH · 6.10 亿')")
                 evaluate("document.getElementById('etfTable').scrollIntoView({block:'center',behavior:'instant'})")
                 wait("document.getElementById('etfTable').getBoundingClientRect().top>=0&&document.getElementById('etfTable').getBoundingClientRect().top<innerHeight")
                 evaluate("document.body.insertAdjacentHTML('beforeend','<div style=\"position:fixed;bottom:0;left:0;z-index:99999;background:#fff5cf;padding:8px\">离线合成行情验收 · 非真实交易价格</div>')")
@@ -209,6 +251,7 @@ def main():
                                   "sse_failure_poll_fallback": True, "cached_history_replay_ui": history_checked,
                                   "candidate_shown_without_formal_event_or_speech": True,
                                   'second_candidates_and_accounting_visible': True, 'journal_api': True,
+                                  'futures_contract_estimates_visible': True,
                                   'upgrade_screenshot': str(upgrade_screenshot),
                                   'mobile_accounting_columns': 2, 'mobile_screenshot': str(mobile_screenshot),
                                   "screenshot": str(screenshot)}, ensure_ascii=False))

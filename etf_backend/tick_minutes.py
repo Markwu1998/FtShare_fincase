@@ -152,13 +152,16 @@ def partial_signals(aggregator, detector, now):
     return result
 
 
-def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, boundary_mode='legacy-right', factor_references=None):
+def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, boundary_mode='legacy-right',
+                    factor_references=None, include_volume=False):
     """Replay recorded reception order; do not move late data back in time.
 
     Rows: [symbol, market_timestamp, received_timestamp, close, day_turnover].
     Historical 1m/1d data is used only to prepare the supplied prior-day baseline.
     """
     aggregator = TickMinutes(day, symbols, symbols, boundary_mode)
+    volume_aggregator = TickMinutes(day, symbols, symbols, boundary_mode) if include_volume else None
+    volumes = {}
     detector = BurstDay(day, baseline, q, replay=True, symbols=symbols, baseline_as_of=baseline_as_of)
     last_received, candidates, levels = None, [], {}
     tick_history, factor_states = [], {}
@@ -168,8 +171,12 @@ def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, bound
             if row["valid"]:
                 detector.add(row["symbol"], row["end"].strftime("%H:%M"), row["amount"],
                              None if boundary_mode == 'legacy-right' else now.isoformat())
+        if volume_aggregator:
+            for row in volume_aggregator.advance(now):
+                if row["valid"]:
+                    volumes.setdefault(row["symbol"], {})[row["end"].strftime("%H:%M")] = row["amount"]
 
-    for symbol, market, received, close, cash in ticks:
+    for symbol, market, received, close, cash, *extra in ticks:
         market = datetime.fromisoformat(market.replace("Z", "+00:00"))
         received = datetime.fromisoformat(received.replace("Z", "+00:00"))
         if market.utcoffset() is None or received.utcoffset() is None:
@@ -184,6 +191,8 @@ def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, bound
         last_received = received
         advance(received)
         accepted = aggregator.add(symbol, market, close, cash)
+        if volume_aggregator and extra:
+            volume_aggregator.add(symbol, market, close, extra[0])
         if accepted and factor_references and 0 <= (received - market).total_seconds() <= 10:
             from .tick_factors import candidates as factor_candidates
             for candidate in factor_candidates(aggregator, baseline, factor_references, symbol, market):
@@ -199,4 +208,4 @@ def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, bound
     advance(datetime.fromisoformat(day + "T15:00:06").replace(tzinfo=CHINA))
     return {**detector.payload(), "feed": "tick-replay", "minute_driver": "tick",
             "candidate_history": candidates, "tick_rejections": aggregator.rejected, 'boundary_mode': boundary_mode,
-            'tick_candidate_history': tick_history}
+            'tick_candidate_history': tick_history, **({'minute_volume_shares': volumes} if include_volume else {})}

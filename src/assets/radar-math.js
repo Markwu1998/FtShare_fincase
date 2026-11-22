@@ -17,8 +17,15 @@ export function burstAccounting(seed, burst, cutoff = '15:00') {
   const symbols = burst.symbols || [];
   const core = seed?.core_fund_daily;
   const sameUniverse = symbols.length > 0 && symbols.length === core?.rows?.length && core.rows.every(r => symbols.includes(r.symbol));
+  const archived = burst.daily_flow;
   let flow = null;
-  if (core?.date === burst.date) {
+  if (burst.replay && cutoff < '15:00') {
+    return { gross, excess, flow, ratio: null, minutes: rows.length };
+  }
+  if (archived?.date === burst.date && archived.unit === 'CNY') {
+    const values = symbols.map(s => archived.by_symbol?.[s]?.flow_cny);
+    if (values.length && values.every(Number.isFinite)) flow = values.reduce((a, b) => a + b, 0) / 1e8;
+  } else if (core?.date === burst.date) {
     const values = symbols.map(s => core.rows.find(r => r.symbol === s)?.flow);
     if (values.length && values.every(Number.isFinite)) flow = values.reduce((a, b) => a + b, 0);
   } else if (sameUniverse) {

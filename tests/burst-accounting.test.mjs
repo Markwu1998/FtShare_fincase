@@ -15,6 +15,16 @@ test('missing data and another attribution date cannot become zero or same-day n
   assert.equal(burstAccounting({}, burst).flow, null);
   assert.equal(burstAccounting({}, {}), null);
 });
+test('day replay displays only complete same-day flows at the post-close cutoff', () => {
+  const replay = {...burst, replay:true, daily_flow:{date:burst.date, unit:'CNY', by_symbol:{a:{flow_cny:-6e8}}}};
+  const seed = {core_fund_daily:{date:burst.date, rows:[{symbol:'a', flow:99}]}};
+  assert.equal(burstAccounting(seed, replay, '14:59').flow, null);
+  assert.equal(burstAccounting(seed, replay, '14:59').ratio, null);
+  assert.equal(burstAccounting(seed, replay).flow, -6);
+  assert.equal(burstAccounting(seed, replay).ratio, -2);
+  assert.equal(burstAccounting(seed, {...replay, symbols:['a','b']}).flow, null);
+  assert.equal(burstAccounting({}, {...replay, daily_flow:{...replay.daily_flow, date:'2026-11-19'}}).flow, null);
+});
 test('reception-time replay cannot see late confirmation before it arrived', () => {
   const replay = {...burst, replay:true, accounting:{minutes:[['a','09:31',1e8,0,'09:35','2026-11-20T09:36:01+08:00']]}};
   assert.equal(burstAccounting({}, replay, '09:36').gross, 0);

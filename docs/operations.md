@@ -171,6 +171,31 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 - 当天分钟缓存的 `fetched_at` 是今天；
 - 若 18:00 后份额/净值已披露，可手动补一次 `update-daily.cmd`。
 
+### 3.4 单日 ETF 异动复盘
+
+Windows 在项目根目录执行以下命令。填写完整交易日期，每次使用独立的输出目录。默认回放配置中的核心 ETF，并为对应的 IF、IH、IC、IM 读取目标日各四个实际挂牌合约。
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode day-replay -Arguments @(
+  '--day=2026-11-20', '--source=rqdata', '--out=.local/day-replay-20261120')
+```
+
+1. 脚本优先复用兼容基准，否则用目标日前 60 个交易日的分钟线和日线生成 20／60 日同窗与全天参考。额度有限时可另用独立目录，通过 `--symbols 510050.SH` 先试单只；下载中断后，用原命令与原输出目录续跑，已完成的标的不再请求。
+2. 查看输出目录中的 `replay/日期.json` 和 `journals/日期.sqlite3`。先核对基准截止日、标的 Tick 与分钟覆盖、期货合约覆盖和秒级基准状态，再看预警、确认、金额及合约分布。ETF 异动金额按标的与分钟去重。期货主动卖成交额、净增仓名义额、卖侧增仓代理额分别判断；覆盖不足的窗口以归档状态为准。
+3. 如需在网页查看，另开 PowerShell，把 `ETF_BURST_DIR` 指向该输出目录，使用空闲端口启动 `web`，在「ETF 异动雷达」选择日期和回放时点。示例端口为 8086。
+
+   ```powershell
+   $env:ETF_BURST_DIR = (Resolve-Path .local/day-replay-20261120).Path
+   $env:DATA_MODE = 'live'
+   $env:ENABLE_RADAR = '1'
+   $env:PORT = '8086'
+   & .\scripts\python-backend.ps1 web
+   ```
+
+已下载的数据可用 `--input-dir` 和 `--offline` 在新输出目录重跑。RQData 历史 Tick 默认按行情时间复盘；保存了真实接收时间的文件才可用接收时钟。30／60 秒候选另需目标日前的秒级基准。DDB 模式待 ETF 和股指期货完整 Tick 接口接入。输入字段、离线示例和基准准备见 [Tick 数据回放](tick-driver.md#tick-数据回放)。复盘按需运行。
+
+雷达回放时点设为 15:00，可查看同篮子日末净申赎及覆盖数。份额未齐时，页面显示已覆盖小计，归档 `daily_flow.by_symbol` 保留逐标的金额和缺数原因。日末披露补齐后，沿用原 Tick 输入目录，用 RQData 联网模式和新的输出目录重跑。完全离线重跑时，将 `inputs/fund-flow.json` 与 Tick 输入一起提供。
+
 ---
 
 ## 4. 数据与目录
@@ -400,7 +425,10 @@ Copy-Item .local\rqdata-market.json "D:\ftshare-backup\rqdata-market-$stamp.json
 & .\scripts\python-backend.ps1 -Mode live -Arguments @('--watch')
 & .\scripts\python-backend.ps1 web
 
-# 回放（独立缓存）
+# ETF 异动单日复盘（独立归档，见 3.4）
+& .\scripts\python-backend.ps1 -Mode day-replay -Arguments @('--day=2026-11-20','--source=rqdata')
+
+# 分时面板回放（独立缓存）
 & .\scripts\python-backend.ps1 -Mode live -Arguments @('--replay=2026-11-13','--cache=.local\rqdata-replay.json')
 & .\scripts\python-backend.ps1 web -ReplayCache '.local\rqdata-replay.json'
 

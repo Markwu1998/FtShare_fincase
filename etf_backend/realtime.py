@@ -1,15 +1,17 @@
 """RQData push collector. Existing board and per-fund radar share one feed."""
 
 from collections import defaultdict, deque
+from contextlib import suppress
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
 from queue import Empty, Full, Queue
-from threading import Event
+from threading import Event, Thread
 from time import monotonic, sleep
 
 from . import provider
 from .burst import BurstDay, query_history, make_baseline, SLOT_INDEX, RULE_VERSION
+from .futures_evidence import FuturesEvidence, PRODUCTS, END_GRACE, window_ticks
 from .tick_minutes import TickMinutes, partial_signals
 from .burst_ledger import BurstLedger
 from .tick_factors import load_references, candidates as tick_candidates, FACTOR_VERSION
@@ -34,18 +36,24 @@ def feed_time(value):
 
 
 class PushSession:
-    def __init__(self, api, day, funds, path, burst_dir, q, symbols=BASKET, minute_driver="provider"):
+    def __init__(self, api, day, funds, path, burst_dir, q, symbols=BASKET, minute_driver="provider", futures_enabled=False):
         if minute_driver not in {"provider", "tick"}:
             raise ValueError("minute_driver must be provider or tick")
         self.minute_driver = minute_driver
         self.day, self.path, self.funds = day, path, funds
         self.symbols = list(symbols)
         self.burst_path = burst_dir / "live.json"
+        previous_futures = {}
         if self.burst_path.is_file():
             previous = read(self.burst_path)
             previous_driver = previous.get("tick_monitor", {}).get("minute_driver", "provider")
             if previous.get("date") == day and previous_driver != minute_driver:
                 raise MinuteDriverConflict("Changing minute_driver during a session requires a separate ETF_BURST_DIR")
+            if previous.get("date") == day:
+                for event in previous.get("events", []):
+                    item = event.get("evidence", {}).get("futures")
+                    if item and item.get("covered") == item.get("expected"):
+                        previous_futures[event["id"], item["window_start"], item["window_end"]] = item
         self.minutes, self.quotes = {}, {}
         self.quote_details = {}
         self.board = None
@@ -56,6 +64,11 @@ class PushSession:
         self.mapping = {s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE"): s for s in self.symbols + [INDEX]}
         self.groups = {f["symbol"]: f["bucket"] for f in funds if f["symbol"] in self.symbols}
         self.index_codes = {s: INDEX_GROUPS.get(group) for s, group in self.groups.items()}
+        self.futures = FuturesEvidence() if futures_enabled else None
+        self.futures_pending = {}
+        self.futures_previous = previous_futures
+        self.futures_written = set()
+        self.etf_bar_volume = {}
         stream_symbols = list(dict.fromkeys(self.symbols + [INDEX] + [c for c in self.index_codes.values() if c]))
         self.tick_minutes = TickMinutes(day, stream_symbols, self.symbols)
         self.provider_minutes, self.local_minutes = {}, {}
@@ -76,6 +89,8 @@ class PushSession:
             self.detector = BurstDay(day, make_baseline([], {}, {}, day, q, self.symbols), q, symbols=self.symbols,
                                      baseline_as_of=previous)
             self.load_baseline(api)
+            if self.futures is not None:
+                self.futures.prepare(api, day, {PRODUCTS[g] for g in self.groups.values() if g in PRODUCTS})
         self.provider_detector = self.detector
         self.tick_detector = None
         if self.detector:
@@ -117,6 +132,61 @@ class PushSession:
                             {'event_id': event['id'], 'signal': signal, 'detected_at': detected,
                              'recovered': recovered, 'ring': ring})
         event['evidence']['ring'] = ring
+        if self.futures is not None and signal["level"] >= 2 and self.groups.get(event["symbol"]) in PRODUCTS:
+            self.futures_pending[event["id"], signal["start"], signal["end"]] = (event, signal, recovered)
+
+    def handle_futures(self, msg, received, now):
+        code = msg.get("order_book_id")
+        if code not in self.futures.rows or "datetime" not in msg or msg.get("channel") != "tick_" + code:
+            return
+        try:
+            timestamp = feed_time(msg["datetime"])
+        except (TypeError, ValueError):
+            return
+        if timestamp.date().isoformat() == self.day and timestamp <= now + timedelta(seconds=2):
+            return self.futures.add(code, timestamp, msg, received)
+
+    def update_futures_evidence(self, now):
+        if self.futures is None:
+            return
+        for key, (event, signal, recovered) in list(self.futures_pending.items()):
+            start_label, end_label = signal["start"], signal["end"]
+            end = feed_time(f"{self.day}T{end_label}:00+08:00")
+            if now < end + END_GRACE:
+                continue
+            del self.futures_pending[key]
+            if key in self.futures_previous:
+                event["evidence"]["futures"] = self.futures_previous[key]
+                continue
+            start = feed_time(f"{self.day}T{start_label}:00+08:00") - timedelta(minutes=1)
+            symbol = event["symbol"]
+            index = self.index_codes[symbol]
+            product = PRODUCTS[self.groups[symbol]]
+            a = self.minutes.get((index, start.strftime("%H:%M")))
+            b = self.minutes.get((index, end_label))
+            spot_return = b[2] / a[2] - 1 if a and a[2] and b and b[2] else None
+            evidence = self.futures.observe(product, start, end, spot_return)
+            slots = SLOTS[SLOT_INDEX[start_label]:SLOT_INDEX[end_label]+1]
+            quantities = [self.etf_bar_volume.get((symbol, slot)) for slot in slots]
+            evidence.update(window_start=start_label, window_end=end_label, etf_turnover_cny=signal["amount"],
+                            etf_volume_shares=sum(quantities) if all(v is not None for v in quantities) else None,
+                            recovered=recovered, observed_at=iso_utc(now))
+            event["evidence"]["futures"] = evidence
+            for contract in evidence["contracts"]:
+                code = contract["code"]
+                for tick in window_ticks(self.futures.rows[code], start, end):
+                    tick_key = (code, tick.timestamp)
+                    if tick_key in self.futures_written:
+                        continue
+                    self.futures_written.add(tick_key)
+                    self.journal.append("futures_tick", code, iso_utc(tick.timestamp), tick.received_at,
+                                        {"last": tick.last, "open_interest": tick.oi, "volume": tick.volume,
+                                         "total_turnover": tick.turnover, "bid": tick.bid, "ask": tick.ask})
+            self.journal.append("futures_evidence", symbol, iso_utc(end), iso_utc(now),
+                                {"event_id": event["id"], **evidence})
+        if self.futures_written:
+            limit = now - timedelta(minutes=22)
+            self.futures_written = {key for key in self.futures_written if key[1] >= limit}
 
     def load_baseline(self, api):
         previous = self.calendar[-2]
@@ -185,9 +255,11 @@ class PushSession:
         if symbol in self.symbols and (cash is None or cash < 0):
             return
         row = (symbol, int(timestamp.timestamp() * 1000), close, cash)
+        if symbol in self.symbols and volume is not None and volume >= 0:
+            self.etf_bar_volume[key] = volume
         received = received or iso_utc(datetime.now(provider.CHINA))
         self.journal.append('bar', symbol, iso_utc(timestamp), received,
-                            {'close': close, 'total_turnover': cash, 'recovered': recovered})
+                            {'close': close, 'total_turnover': cash, 'volume': volume, 'recovered': recovered})
         self.provider_minutes[key] = row
         self.feed_detector(self.provider_detector, symbol, slot, cash, received, recovered=recovered)
         if self.minute_driver == "provider":
@@ -401,12 +473,15 @@ class PushSession:
             return
         now = datetime.now(provider.CHINA)
         self.advance_ticks(now)
+        self.update_futures_evidence(now)
         for event in self.detector.events:
             if event["last"] >= (now - timedelta(minutes=2)).strftime("%H:%M"):
                 self.evidence(event)
         report = self.detector.payload()
         report["feed"] = "push"
         report["baseline_ready"] = self.baseline_ready
+        if self.futures is not None:
+            report["futures_monitor"] = {"state": self.futures.state, "products": list(self.futures.products)}
         report["candidates"] = self.candidates(now)
         report['tick_candidates'] = [c for rows in self.second_candidates.values() for c in rows
                                      if 0 <= (now - datetime.fromisoformat(c['observed_at'])).total_seconds() <= 10]
@@ -471,7 +546,50 @@ class PushSession:
         self.last_publish = monotonic()
 
 
-def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_driver="provider"):
+class FuturesStream:
+    """Connect and retry away from the ETF collection loop."""
+
+    def __init__(self, api, codes):
+        self.api = api
+        self.channels = ["tick_" + code for code in codes]
+        self.messages = Queue(maxsize=12000)
+        self.stopped = Event()
+        self.client = None
+        self.state = "waiting"
+        Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        while not self.stopped.is_set():
+            try:
+                self.client = self.api.LiveMarketDataClient()
+                if self.stopped.is_set():
+                    return
+                self.client.subscribe(self.channels)
+                self.state = "waiting"
+                for msg in self.client.listen():
+                    if self.stopped.is_set():
+                        return
+                    self.messages.put_nowait((msg, iso_utc(datetime.now(provider.CHINA))))
+                    self.state = "receiving"
+            except Exception as error:
+                if not self.stopped.is_set():
+                    print(f"Futures Tick stream unavailable ({type(error).__name__})", flush=True)
+            finally:
+                if self.client:
+                    with suppress(Exception):
+                        self.client.close()
+                    self.client = None
+            self.state = "feed_unavailable"
+            self.stopped.wait(30)
+
+    def close(self):
+        self.stopped.set()
+        client = self.client
+        if client:
+            Thread(target=client.close, daemon=True).start()
+
+
+def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_driver="provider", futures_enabled=False):
     session = None
     heartbeat = Path(path).with_name("collector.heartbeat")
     while True:
@@ -489,11 +607,12 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_dri
             sleep(15)
             continue
         client = None
+        future_stream = None
         try:
             if session is None or session.day != day:
                 if session:
                     session.journal.close()
-                session = PushSession(api, day, funds, path, burst_dir, q, symbols, minute_driver)
+                session = PushSession(api, day, funds, path, burst_dir, q, symbols, minute_driver, futures_enabled)
             if not session.detector:
                 continue
             if preparing:
@@ -513,6 +632,9 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_dri
                 except Full:
                     overflow.set()
             worker = client.listen(handler=enqueue)
+            if session.futures and session.futures.rows:
+                future_stream = FuturesStream(api, session.futures.rows)
+            last_futures_input = monotonic()
             connected = monotonic()
             last_input = connected
             last_warm = connected
@@ -531,6 +653,20 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_dri
                     # No market messages during lunch; do not trip the 45s
                     # stream watchdog, and keep the heartbeat fresh.
                     last_input = monotonic()
+                if future_stream:
+                    if lunch:
+                        last_futures_input = monotonic()
+                    for _ in range(512):
+                        try:
+                            futures_msg, futures_received = future_stream.messages.get_nowait()
+                        except Empty:
+                            break
+                        if session.handle_futures(futures_msg, futures_received, current):
+                            last_futures_input = monotonic()
+                    if not lunch and monotonic() - last_futures_input >= 45:
+                        session.futures.state = "feed_unavailable"
+                    else:
+                        session.futures.state = future_stream.state
                 try:
                     msg, received = messages.get(timeout=1)
                     if session.handle(msg, received):
@@ -569,5 +705,7 @@ def watch(api, funds, path, burst_dir, q, continuous, symbols=BASKET, minute_dri
             print(f"RQData push interrupted ({type(error).__name__}); retrying", flush=True)
             sleep(5)
         finally:
+            if future_stream:
+                future_stream.close()
             if client:
                 client.close()

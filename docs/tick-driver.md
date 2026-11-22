@@ -1,5 +1,23 @@
 # Tick 驱动异动监控与并行验收
 
+## 股指期货同窗观测
+
+在 `config/etf-burst.json` 中用 `futures_evidence` 控制期货观察。采集器查询当天 IF、IH、IC、IM 实际挂牌的四个期限，独立订阅 RQData Level 1 Tick。ETF 达到原规则二级及以上后，约在窗口结束 6 秒后生成对应期货观测。界面每个 ETF 事件显示最近一次确认窗口，日志保留每一次。相同指数的多个 ETF 可以引用重叠期货窗口，跨 ETF 汇总期货金额须先按合约和时间去重。
+
+ETF 窗口展示成交金额和分钟线成交股数。期货净增仓名义额按各合约的「结束持仓减起始持仓 × 起始价格 × 合约乘数」累计，包含有符号减仓，四个合约的窗口端点均齐备时才展示整体值。界面还显示起止时间、合约数量、方向可分类成交额占比及可用的期货相对现货收益变化。
+
+相邻 Tick 的累计成交手数和成交额分别差分。若区间均价和最新价均不高于上一帧买一，将该区间成交额计入**主动卖成交额估算**。若两者均不低于卖一，计为可分类的买侧区间。锁价、盘口缺失、跨窗口起点、快照间隔超过 10 秒或方向不清的区间不归类。累计数倒退、持仓变动超过区间成交手数、端点超过 10 秒未更新时，对应合约窗口标为缺测。
+
+**卖侧增仓估算额**只计算判为卖侧且持仓上升的区间，计算式为「正增仓手数 × 区间成交均价 × 合约乘数」。同窗整体净增仓且有正的卖侧增仓估算值时，界面提示「同窗增仓伴卖侧迹象」。快照可能合并多个方向和开平仓交易，正增仓与主动卖在同一快照间隔共现无法确认为同一笔卖开，更无法识别套保或交易账户。
+
+结果写入当日私有 SQLite 日志的 `futures_evidence`，包括 ETF 事件 ID、窗口、股数和成交额、估算值、覆盖率、合约及期限分布。用于复算的窗口期货快照保存为 `futures_tick`，带行情和接收时间，可通过现有日志接口按类型和代码分页。窗口重叠时快照去重。盘中重启前尚未收到或已超出内存窗口的数据可能缺测。历史分钟回放没有期货 Tick 证据时显示缺失。
+
+`futures-l1-window-v2` 在窗口合计和每个合约中保存 `directions`，分别记录卖侧、买侧、未分类区间的成交额、持仓增加和减少手数、增加额、减少额及净变化额。持仓金额按各合约窗口期初价和乘数计算，持仓减少额为负数，三区间净变化之和可与全窗口净增仓名义额对账。卖侧增仓估算额仍按相应区间成交均价计算。卖侧区间持仓减少可以用来定位疑似卖平样本，快照无法识别个别成交的开平仓方向。
+
+异动雷达的「期货金额口径」默认选主动卖成交额估算。切换后，事件行、期货金额与 ETF 同窗成交额之比，以及合约明细同步更新。下拉选择仅影响显示，日志始终保存所有字段。四期限不齐时，分类合计缺失，已有合约可单独查看。旧归档保留原字段，新字段缺失显示横线。
+
+`GET /api/etf-burst/journal?date=YYYY-MM-DD&kind=futures_evidence` 查询窗口证据。将 `kind` 换为 `futures_tick`，并以 `symbol=IF2612` 等实际合约筛选，可查询保存的 Tick。数据字段见 [RQData 行情说明](https://www.ricequant.com/doc/rqdata/python/generic-api.html)。
+
 ## 当前行为
 
 实时入口同时订阅 ETF、主指数及辅助指数的 `tick_`，由本地 `TickMinutes` 聚合对齐分钟。供应商 `bar_` 保留作独立对账和缺口补齐，普通分钟与事件回放接口保持不变。
@@ -33,7 +51,7 @@ L1 Tick 是行情快照，不等于逐笔成交。两个快照之间的成交无
 默认 `config/etf-burst.json`：
 
 ```json
-{"amount_window_quantile": 0.75, "minute_driver": "provider"}
+{"amount_window_quantile": 0.75, "minute_driver": "provider", "futures_evidence": true}
 ```
 
 独立 Tick 主驱动测试可保存 `.local/etf-burst-tick.json`：
@@ -68,6 +86,46 @@ $env:FTSHARE_LIVE_CACHE_FILE = 'data/private/rqdata-tick-live.json'
 出现金额差异时记录差异，不自动覆盖本地封闭分钟，不倒改已发出的事件。Tick 模式中的 bar 补齐事件保留 `recovered` 标记并遵循原有“不补播”规则。
 
 ## Tick 数据回放
+
+### 单日复盘命令
+
+Windows 从项目根目录运行。默认回放配置里的全部 ETF，`--symbols` 可缩小范围，尤其适合先验证权限和额度。以下示例只回放 510050 及其对应的 IH 四期限合约。
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode day-replay -Arguments @(
+  '--day=2026-10-21', '--source=rqdata', '--symbols', '510050.SH')
+```
+
+跨平台已配置 RQData 的环境可执行 `python scripts/replay-burst-day.py --day=2026-10-21 --source=rqdata`。默认输出为 `.local/burst-day-replay/日期/`，与实时采集目录独立。
+
+命令先使用兼容的当天基准缓存。显式 `--baseline` 优先，随后检查输入目录下的 `baseline.json`、此前生成的本地基准、实时采集目录的 `baselines/日期.json`。日期、标的、P 分位和规则版本必须匹配。RQData 模式找不到兼容基准时，会自动取目标日前 60 个交易日的 ETF 分钟成交额和日成交额，并调用与盘中相同的算法生成 20/60 日同窗分位数和全天中位数。目标日不会进入基准。有效日样本数不足时保留对应参考缺口，缺少可用基准的标的会明确报错。
+
+联网模式用实际挂牌合约取数，只请求指定日期和所需字段。基准在取当日 Tick 前完成；Tick 分标的写入 `inputs/etf/` 和 `inputs/futures/`。若额度或网络中途阻断，保留已下载文件，并报告失败的接口和异常类型。额度恢复后用**同一条命令和同一输出目录**续跑，不重新请求已缓存的数据。可用 `--symbols` 先做小样本。脚本不会循环重试额度错误。
+
+已有当天 Tick 时，用 `--input-dir` 指向文件目录。仍可让 RQData 自动补前序基准。若要求完全离线，加 `--offline` 并提供兼容基准，或在目录中放入 `baseline.json`。合并 CSV 或按标的分文件均可：
+
+| 文件 | 必需字段 |
+| --- | --- |
+| `etf.csv` 或 `etf/标的.csv` | `symbol,datetime,last,total_turnover`。可选 `volume` 为日累计股数。 |
+| `futures.csv` 或 `futures/合约.csv` | `symbol,datetime,last,total_turnover,volume,open_interest,b1,a1`。成交额单位元，`volume` 为当日累计手数，买卖一无效时留空。 |
+| `contracts.json` | `{"date":"2026-10-21","products":{"IH":["IH2611","IH2612","IH2703","IH2706"]}}`。实际挂牌合约按到期顺序排列。 |
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode day-replay -Arguments @(
+  '--day=2026-10-21', '--source=rqdata', '--offline',
+  '--input-dir=.local/burst-day-replay/2026-10-21/inputs',
+  '--symbols', '510050.SH', '--out=.local/ih-replay-offline')
+```
+
+默认 `--clock=market` 按交易所行情时间重建。若两类文件都包含带时区的 `received_at`，可用 `--clock=received` 按记录接收顺序处理迟到数据。历史 RQData Tick 不带实际接收时刻，因此不能复现生产推送延迟。单日 Tick 模式复用正式判定公式，但底层分钟额来自 Tick 聚合；逐条复刻默认供应商分钟告警还需要当时的分钟推送及补数记录。期货分类继续是盘口快照估算。现货基差、ETF IOPV、盘口等辅助证据如需原样还原，还需对应数据及接收顺序。
+
+分钟内候选使用正式分钟基准。30/60 秒持续性候选另需此前的秒级基准，命令会读取兼容缓存，也可用 `--tick-factor-baseline` 指定。缺少时仍完成分钟复盘，归档标明秒级基准未启用。需要秒级复盘时，可用已有 `tick-baseline` 命令按目标日构建。该步骤需要历史 Tick，数据用量高于分钟基准。
+
+输出包括 `replay/日期.json` 和 `journals/日期.sqlite3`。JSON 保存分钟覆盖、事件、候选、每次确认的期货分类及合约明细。SQLite 保存正式命中、相关期货快照和每次期货判断。运行后把网页进程的 `ETF_BURST_DIR` 指向该复盘输出目录，即可在 ETF 异动雷达选择日期并拖动回放时点，切换期货金额字段。网页在窗口确认并且期货计算可用之后才显示该窗口证据。
+
+RQData 联网复盘另取目标日和上一交易日的期末份额、单位净值及折算信息，沿用日度申赎估算口径。原始记录保存到 `inputs/fund-flow.json`。离线复盘可把该文件随 Tick 输入目录一并传入。归档 `daily_flow` 记录每只标的的 `flow_cny`、缺数原因、有效覆盖和完整篮子的 `net_flow_cny`，金额单位为元。部分标的缺数时，篮子净额及其与异动成交额的比值留空。雷达回放在 15:00 或更晚显示盘后归属结果，供复盘对照。
+
+**DDB 待办**。命令预留 `--source=ddb`。目前缺少完整 ETF 和股指期货 Tick 接口，选择 DDB 会明确报未接入。接入时还需对齐交易所时区、接收时间、累积成交额/成交量、持仓量、买卖一价、历史分钟/日基准及当日挂牌合约名单。
 
 `burst-replay --burst-input` 保留原成交额分钟导入；输入额外含 `ticks` 时使用同一个 Tick 聚合器重放。`1m`/`1d` 仍用于构造截至前一交易日的基准，不能省略历史样本而冒充基准充分。
 
