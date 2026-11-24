@@ -11,6 +11,7 @@ function Invoke-History([string]$source, [string]$seed) {
     $arguments = @('--source', $source, '--seed', $seed)
     if (-not $Full) { $arguments += '--recent' }
     & (Join-Path $PSScriptRoot 'python-backend.ps1') history -Arguments $arguments
+    if ($LASTEXITCODE -ne 0) { throw "$source history exited with code $LASTEXITCODE" }
 }
 
 # RQData is the default. A late RQData history failure must not prevent the
@@ -37,6 +38,7 @@ try {
 if (-not $SkipCrowding) {
     try {
         & (Join-Path $PSScriptRoot 'python-backend.ps1') crowding
+        if ($LASTEXITCODE -ne 0) { throw "Crowding exited with code $LASTEXITCODE" }
     } catch {
         Write-Warning "Crowding update failed: $($_.Exception.Message)"
         $failed = $true

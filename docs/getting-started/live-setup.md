@@ -20,8 +20,11 @@
 
 ```powershell
 $env:DATA_MODE = 'live'
+$env:ENABLE_RADAR = '1'
 & .\scripts\python-backend.ps1 history
 ```
+
+逐只 ETF 雷达的采集器独立取前 60 个交易日的参考数据，网页历史分钟样本由 `minute_days` 单独配置。
 
 首次约数分钟。已有 `data/private/rqdata-seed.json` 时跳过；之后每日只用 `--recent`。覆盖率不足或披露未到会直接失败，不覆盖旧快照。
 
@@ -55,9 +58,10 @@ DATA_MODE=live ENABLE_RADAR=1 uvicorn etf_backend.web:app --host 127.0.0.1 --por
 - 09:15 预载 60 日分钟基准，09:30 订阅分钟线与 tick。
 - 11:30–13:00 保持同一订阅不断流，13:01 不需要额外回补。
 - 开市中启动、进程重启或上游断流时，用 RQData 分钟线补齐已结束分钟。
+- 浏览器优先通过 `/api/live/stream` 接收约每秒合并的 Tick 更新，连接失败时每 2 秒读取 `/api/live` 缓存；日频检查仍独立进行。最新价、成交额、盘口和逐只时间随 Tick 更新，分钟图与放量确认仅使用完整 bar；首个完整分钟之前也可展示已收到的报价。
 - 收盘后可执行一次 `live --close` 补全到 15:00。
 
-详见 [数据管线](../operations/data-pipeline.md)。
+详见 [数据管线](../operations/data-pipeline.md) 与 [Tick 驱动异动监控](../reference/tick-driver.md)。
 
 ## 5. 回放
 

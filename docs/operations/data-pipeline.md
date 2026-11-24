@@ -13,6 +13,7 @@
 | `data/private/rqdata-crowding*.json` | 拥挤度日度、行业、公募、融资 | `crowding` |
 | `data/private/etf-burst/live.json` | 当日逐 ETF 放量事件 | 采集器自动写入 |
 | `data/private/etf-burst/sessions/` | 每日事件归档 | 采集器自动写入 |
+| `data/private/etf-flow-comparison.json` | 主动成交与净申赎专题快照 | `etf_backend.flow_comparison` 导入 |
 
 ## 历史快照与增量更新
 
@@ -56,7 +57,9 @@
 & .\scripts\python-backend.ps1 -Mode burst-replay -Arguments @('--start=2026-11-12','--end=2026-11-13')
 ```
 
-已有 RQData 成交量导出时，可用 `--burst-input` 离线回放。实时和历史快照分目录保存。
+已有 RQData 成交额导出时，可以用 `--burst-input` 离线回放。输入包含 `schema_version:2`、`metric:"turnover"`、`unit:"CNY"`，以及 `1m` 和 `1d` 两组 `[symbol, date, slot, amount]`；`amount` 为元，分钟与日线须同口径。实时和历史快照分目录保存。
+
+需要单日 ETF 和期货 Tick 同窗、日末申赎与 SQLite 日志时使用 `day-replay`，命令与离线输入见 [Tick 数据回放](../reference/tick-driver.md#tick-数据回放)。日度主动成交对照从独立专题 CSV 导入，快照可独立热加载，筛选与操作见[日度对照操作](runbook.md#35-日度主动成交与申赎对照)。
 
 ## 定时任务
 
@@ -74,7 +77,7 @@
 
 ## 体量参考
 
-362 只 ETF、2025 年起的快照约 1.0 MB，每个交易日新增约 1.1 KB（约 0.26 MB/年）；盘中缓存约 18 KB；逐 ETF 放量归档约 7 KB/交易日。一年合计约 2–3 MB。
+历史快照体量取决于历史范围、有效基金数与 `minute_days`；盘中缓存覆盖写入，事件归档、基准、Tick 输入与 SQLite 日志按日期累积。以 20 只 ETF 单日复盘为例，JSON 约 1.5 MB、SQLite 约 41 MB。磁盘规划与备份见[容量](runbook.md#42-容量)。
 
 ## 相关文档
 

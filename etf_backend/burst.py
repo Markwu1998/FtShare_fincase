@@ -1,6 +1,7 @@
-"""Per-ETF short-window volume signals, shared by live collection and replay."""
+"""Per-ETF turnover signals, shared by live collection and replay."""
 
 from datetime import datetime, timedelta
+from hashlib import sha256
 from math import floor
 from statistics import median
 
@@ -12,6 +13,27 @@ AFTERNOON = SLOTS.index("13:01")
 END = SLOTS.index("14:57")
 SLOT_INDEX = {slot: i for i, slot in enumerate(SLOTS)}
 DEFAULT_DIR = "data/private/etf-burst"
+RULE_VERSION = "turnover-p75-v1"
+
+
+def validate_metric(value):
+    if (value.get("schema_version"), value.get("metric"), value.get("unit")) != (2, "turnover", "CNY"):
+        raise ValueError("Expected schema_version=2, metric=turnover, unit=CNY; regenerate legacy archives")
+    return value
+
+
+def window_totals(values, length):
+    """Rolling sums with missing-minute and session boundaries preserved."""
+    result, cash, gaps = [], [0], [0]
+    for i in range(END + 1):
+        value = values[i] if i < len(values) else None
+        valid = finite(value) and value >= 0
+        cash.append(cash[-1] + (value if valid else 0))
+        gaps.append(gaps[-1] + int(not valid))
+        start = i + 1 - length
+        allowed = start >= (AFTERNOON if i >= AFTERNOON else 0)
+        result.append(cash[i + 1] - cash[start] if allowed and gaps[i + 1] == gaps[start] else None)
+    return result
 
 
 def total_window(values, end, length):
@@ -43,7 +65,7 @@ def make_baseline(days, minutes, daily, as_of, q, symbols=BASKET):
         histories = [minutes.get(day, {}).get(symbol, []) for day in dates]
         series = {}
         for length in WINDOWS:
-            columns = zip(*[[total_window(values, i, length) for i in range(END + 1)] for values in histories])
+            columns = zip(*(window_totals(values, length) for values in histories))
             for i, values in enumerate(columns):
                 pairs = [[v for v in values[-n:] if v is not None] for n in (20, 60)]
                 series[length, i] = [
@@ -94,13 +116,16 @@ def detect(values, end, baseline, shadow=False):
 
 
 class BurstDay:
-    def __init__(self, day, baseline, quantile_value, replay=False, symbols=BASKET):
+    def __init__(self, day, baseline, quantile_value, replay=False, symbols=BASKET, baseline_as_of=None):
         self.day, self.baseline, self.quantile, self.replay = day, baseline, quantile_value, replay
         self.values = {s: [None] * len(SLOTS) for s in symbols}
         self.latest = {}
         self.events = []
         self.active = {}
         self.shadow = {}
+        self.baseline_as_of = baseline_as_of
+        self.on_signal = None
+        self.accounted = {}
 
     def add(self, symbol, slot, amount, received=None, *, recovered=False):
         end = SLOT_INDEX.get(slot, -1)
@@ -121,6 +146,8 @@ class BurstDay:
         if not signal:
             return
         detected = None if self.replay else iso_utc(datetime.now(CHINA))
+        if received:
+            signal['received_at'] = received
         event = self.active.get(symbol)
         if event is None or end - SLOT_INDEX[event["last"]] > 10:
             event = {"id": f"{self.day}/{symbol}/{slot}", "symbol": symbol, "first": slot, "last": slot,
@@ -145,11 +172,32 @@ class BurstDay:
             if (signal["level"], min(signal["daily"], default=0) if None not in signal["daily"] else 0) > (
                     peak["level"], min(peak["daily"], default=0) if None not in peak["daily"] else 0):
                 event["peak"] = signal
+        if signal['level'] >= 2:
+            for i in range(SLOT_INDEX[signal['start']], end + 1):
+                refs = self.baseline[symbol][1].get((1, i), ([None, None],))[0]
+                reference = max(refs) if all(finite(v) for v in refs) else None
+                self.accounted.setdefault((symbol, i), [symbol, SLOTS[i], values[i], reference, slot, received])
+        if self.on_signal:
+            self.on_signal(event, signal, received, detected, recovered)
+
+    def accounting(self):
+        rows = list(self.accounted.values())
+        known = [r for r in rows if finite(r[3])]
+        return {'method': 'confirmed-window-union-v1', 'unit': 'CNY', 'minutes': rows,
+                'gross': sum(r[2] for r in rows), 'covered_minutes': len(rows),
+                'reference_coverage': len(known),
+                'positive_excess': sum(max(r[2] - r[3], 0) for r in known) if len(known) == len(rows) else None}
 
     def payload(self):
-        return {"provider": "RQData", "date": self.day, "quantile": self.quantile, "metric": "turnover", "replay": self.replay,
+        return {"schema_version": 2, "unit": "CNY", "rule_version": RULE_VERSION,
+                "baseline_as_of": self.baseline_as_of,
+                "basket_hash": sha256("\n".join(self.values).encode()).hexdigest(),
+                "minute_coverage": {"expected": END + 1, "received": {s: sum(v is not None for v in values)
+                                                                         for s, values in self.values.items()}},
+                "symbols": list(self.values), "provider": "RQData", "date": self.day, "quantile": self.quantile, "metric": "turnover", "replay": self.replay,
                 "through": SLOTS[max(self.latest.values())] if self.latest else None,
-                "updated_at": iso_utc(datetime.now(CHINA)), "events": self.events, "median_hits": self.shadow}
+                "updated_at": iso_utc(datetime.now(CHINA)), "events": self.events, "median_hits": self.shadow,
+                "accounting": self.accounting()}
 
 
 def query_history(api, start, end, symbols=BASKET):
@@ -177,7 +225,8 @@ def query_history(api, start, end, symbols=BASKET):
 
 
 def replay_day(day, dates, minutes, daily, q, symbols=BASKET):
-    detector = BurstDay(day, make_baseline(dates, minutes, daily, day, q, symbols), q, replay=True, symbols=symbols)
+    detector = BurstDay(day, make_baseline(dates, minutes, daily, day, q, symbols), q, replay=True, symbols=symbols,
+                        baseline_as_of=max((d for d in dates if d < day), default=None))
     for i, slot in enumerate(SLOTS[:END + 1]):
         for symbol, values in minutes.get(day, {}).items():
             detector.add(symbol, slot, values[i])

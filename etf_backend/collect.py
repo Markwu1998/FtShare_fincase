@@ -173,7 +173,7 @@ def history_snapshot(market, records, universe, config, end, closes=None, source
                              "missing_days": sum(d <= latest and value is None for d, value in zip(broad["dates"], broad["total"]))}}
 
 
-def live_snapshot(result, funds, date, replay, close=False):
+def live_snapshot(result, funds, date, replay, close=False, partial=False):
     if date not in result["calendar"]:
         return None
     rows = [row for row in result["minutes"] if stamp(row[1]).date().isoformat() == date]
@@ -185,24 +185,27 @@ def live_snapshot(result, funds, date, replay, close=False):
     previous = {s: close for s, _, close, _ in result["previous"]}
     quotes = {s: (ms, close, amount) for s, ms, close, amount in result["daily"]}
     complete = [i for i, slot in enumerate(SLOTS) if finite(cumulative[i]) and finite(index.get(slot))]
-    if not complete or not finite(previous.get(INDEX)):
+    if (not complete and not partial) or not finite(previous.get(INDEX)):
         return None
     names = {row["symbol"]: row["name"] for row in funds}
     table = []
     for symbol in BASKET:
         ms, close, amount = quotes.get(symbol, (None, None, None))
-        if not (finite(close) and finite(amount) and amount >= 0):
+        if not (finite(close) and finite(amount) and amount >= 0) and not partial:
             return None
         prior = previous.get(symbol)
-        table.append({"symbol": symbol, "code": symbol[:6], "name": names[symbol], "price": close, "amount": amount / 1e8,
-                      "pct": (close / prior - 1) * 100 if finite(prior) and prior > 0 else None})
-    minute = SLOTS[complete[-1]]
-    end = datetime.fromisoformat(date + "T" + minute).replace(tzinfo=provider.CHINA).timestamp()
+        table.append({"symbol": symbol, "code": symbol[:6], "name": names[symbol], "price": close,
+                      "amount": amount / 1e8 if finite(amount) and amount >= 0 else None,
+                      "quote_at": iso_utc(stamp(ms)) if ms is not None else None,
+                      "pct": (close / prior - 1) * 100 if finite(close) and finite(prior) and prior > 0 else None})
+    minute = SLOTS[complete[-1]] if complete else None
+    end = datetime.fromisoformat(date + "T" + (minute or "09:30")).replace(tzinfo=provider.CHINA).timestamp()
     observed = end
     value = {"provider": "RQData", "formula": FORMULA, "warnings": [], "date": date, "slots": SLOTS,
              "fetched_at": iso_utc(datetime.fromtimestamp(observed, timezone.utc)), "bars": bars,
              "coverage": coverage, "closes": [index.get(s) for s in SLOTS], "pre_close": previous[INDEX],
-             "cumulative": cumulative, "table": table, "amount": sum(row["amount"] for row in table),
+             "cumulative": cumulative, "table": table,
+             "amount": sum(row["amount"] for row in table) if all(finite(row["amount"]) for row in table) else None,
              "last_complete_minute": minute, "expected_flow_date": result["calendar"][-2],
              "trading_dates": result["calendar"], "daily_batches": 0}
     if replay:
@@ -258,7 +261,9 @@ def main():
                         help="Re-collect the recent overlap window and merge it into the existing history snapshot")
     parser.add_argument("--burst-dir", default=os.environ.get("ETF_BURST_DIR", "data/private/etf-burst"))
     parser.add_argument("--burst-config", default=os.environ.get("ETF_BURST_CONFIG", "config/etf-burst.json"))
-    parser.add_argument("--burst-input", help="Use a local RQData volume export for an offline burst replay")
+    parser.add_argument('--tick-boundary', choices=['legacy-right', 'provider-v2'], default='legacy-right')
+    parser.add_argument('--tick-factor-baseline', help='Prepared Tick baseline file for a single replay day')
+    parser.add_argument("--burst-input", help="Use a schema_version=2 turnover/CNY export for offline replay")
     parser.add_argument("--replay", type=lambda s: datetime.fromisoformat(s).date().isoformat())
     args = parser.parse_args()
     if args.replay and (args.mode != "live" or args.watch or Path(args.cache).resolve() ==
@@ -274,6 +279,9 @@ def main():
             burst_config = read(ROOT / args.burst_config)
             q = burst_config.get("amount_window_quantile", burst_config.get("volume_window_quantile", 0.75))
             symbols = burst_config.get("symbols") or BASKET
+            minute_driver = burst_config.get("minute_driver", "provider")
+            if minute_driver not in {"provider", "tick"}:
+                raise ValueError("minute_driver must be provider or tick")
             if not isinstance(symbols, list) or not symbols or not all(isinstance(s, str) for s in symbols):
                 raise ValueError("etf-burst symbols must be a non-empty list of symbols")
             unknown = [symbol for symbol in symbols if symbol not in {fund["symbol"] for fund in universe["funds"]}]
@@ -283,13 +291,16 @@ def main():
                 raise ValueError("amount_window_quantile must be between 0 and 1")
         if args.mode == "burst-replay" and args.burst_input:
             from .burst import SLOT_INDEX
-            source = read(args.burst_input)
+            from .burst import validate_metric
+            source = validate_metric(read(args.burst_input))
             minutes, daily = {}, {}
             for symbol, day, slot, volume in source["1m"]:
                 minutes.setdefault(day, {}).setdefault(symbol, [None] * len(SLOTS))[SLOT_INDEX[slot]] = volume
             for symbol, day, _, volume in source["1d"]:
                 daily.setdefault(day, {})[symbol] = volume
-            run_burst_replay(args, burst_dir, q, sorted(daily), minutes, daily, replay_day, symbols)
+            ticks = source.get("ticks")
+            calendar = sorted(set(daily) | {str(row[1])[:10] for row in ticks or []})
+            run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, symbols, ticks=ticks)
             return
         api = None
         if not (args.mode == "history" and args.source == "ddb"):
@@ -358,6 +369,7 @@ def main():
             adapter = build_source(args.source, source_config, api=api, universe=universe,
                                    collection_config=config)
             target = min(args.end, before(datetime.now(provider.CHINA).date().isoformat(), 1))
+            target = adapter.target_date(target)
             status = adapter.status(target)
             if not status.ready:
                 raise ValueError(f"{adapter.label} source not ready: {status.reason}")
@@ -388,7 +400,8 @@ def main():
             live_run(rqdatac, universe["funds"], args.cache, args.replay)
         else:
             from .realtime import watch
-            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch, symbols)
+            watch(rqdatac, universe["funds"], args.cache, burst_dir, q, args.watch, symbols, minute_driver,
+                  futures_enabled=burst_config.get("futures_evidence", False) is True)
     except Exception as error:
         if os.environ.get("ETF_DEBUG") == "1":
             import traceback
@@ -401,13 +414,26 @@ def main():
         parser.exit(1, f"{args.source.upper()} {args.mode} failed ({type(error).__name__}). Check configuration and data coverage.\n")
 
 
-def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, symbols):
+def run_burst_replay(args, burst_dir, q, calendar, minutes, daily, replay_day, symbols, ticks=None):
     dates = [day for day in calendar if (args.start or args.end) <= day <= args.end]
     if not dates:
         raise ValueError("No requested replay dates in turnover data")
     count = elevated = 0
     for day in dates:
-        archive = replay_day(day, calendar, minutes, daily, q, symbols)
+        if ticks is None:
+            archive = replay_day(day, calendar, minutes, daily, q, symbols)
+        else:
+            from .burst import make_baseline
+            from .tick_minutes import replay_tick_day
+            from .tick_factors import load_references
+            previous = max((d for d in calendar if d < day), default=None)
+            refs = None
+            if args.tick_factor_baseline:
+                refs, state = load_references(args.tick_factor_baseline, day, previous, q)
+                if state != 'ready':
+                    raise ValueError('Tick replay baseline is ' + state)
+            archive = replay_tick_day(day, make_baseline(calendar, minutes, daily, day, q, symbols), q, ticks,
+                                      symbols, previous, boundary_mode=args.tick_boundary, factor_references=refs)
         if archive["through"] is None:
             raise ValueError(f"Missing replay minutes for {day}")
         publish(burst_dir / "replay" / f"{day}.json", archive)

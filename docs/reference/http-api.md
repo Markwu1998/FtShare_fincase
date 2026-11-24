@@ -29,9 +29,12 @@ FastAPI 只提供 GET/HEAD 只读接口。所有日频接口读取已发布的�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/live` | 当日盘中分钟缓存；盘前、跨日或采集器未运行时返回 503 |
+| GET | `/api/live/stream` | Tick 行情 SSE，约每秒合并推送；无当日有效数据时发送 `unavailable`，反向代理需关闭响应缓冲 |
 | GET | `/api/etf-burst` | 指定日期的逐 ETF 放量事件；`?date=YYYY-MM-DD` |
 | GET | `/api/etf-burst/dates` | 可用日期列表；雷达未启用返回 404 |
 | GET | `/api/etf-burst/stream` | SSE 事件流；反向代理需关闭响应缓冲 |
+| GET | `/api/etf-burst/journal` | 分页读取事件与行情日志；`?date=YYYY-MM-DD&after=…&limit=…` |
+| GET | `/api/etf-flow-comparison` | 主动成交与日末净申赎专题快照；演示模式或快照未就绪返回 503 |
 
 ## 拥挤度
 

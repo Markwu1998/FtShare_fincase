@@ -6,6 +6,8 @@
 > 实时行情：当前为 **RQData**；实时源下拉已预留，后续可扩展其他实时源。  
 > 关联文档：[RQData / DDB 日频对照](../../reference/data-sources/ddb.md)
 
+> 2026-11-19 优化后：已增加 `fund_nav` 历史同日净值回退、`NET_INFLOW` 对账、`SPLIT_RATIO` 累乘因子和逐只目标日价格/成交额/份额/净值检查。DDB 使用已观察到的上证指数交易日期处理周末/节假日，尚不能识别整个指数源也漏掉的交易日；`fund_div` 独立交叉核对仍待真实数据验证。当前证据与限制见 [优化与验收](../verification/tick-live-20261119.md)，原始问题见 [合并审查](../verification/merge-review-20261119.md)。
+
 ## 1. 目标
 
 1. 日频数据支持 **RQData / DDB** 两个来源，用户可在页面上**一键切换**；

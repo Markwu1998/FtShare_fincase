@@ -89,10 +89,12 @@ def fund_flows(fund, records, calendar):
                         and 0.75 <= raw_share_ratio / candidate <= 1.33)
         if candidate_ok and ratio == 1:
             ratio = float(candidate)
-            split_source = "source fund split"
+            split_source = records.get("split_source", "source fund split")
         else:
             split_source = None
         issues = []
+        if day in records.get("unverified_split_dates", []):
+            issues.append("split_evidence_missing")
         if share is None:
             issues.append("share_missing")
         if prior is None:

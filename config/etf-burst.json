@@ -1,3 +1,5 @@
 {
-  "amount_window_quantile": 0.75
+  "amount_window_quantile": 0.75,
+  "minute_driver": "provider",
+  "futures_evidence": true
 }

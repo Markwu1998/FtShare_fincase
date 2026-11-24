@@ -1,4 +1,39 @@
 export const RADAR_DEFAULTS = { cumulative: 1.5, burst: 2, minBurstAmount: 5, fundFlow: 10 };
+export function visibleBurstSignals(event, day, cutoff) {
+  const until = Date.parse(day + 'T' + cutoff + ':00+08:00');
+  return (event.updates || []).filter(v => v.end <= cutoff && (!v.received_at || Date.parse(v.received_at) <= until));
+}
+export function burstAccounting(seed, burst, cutoff = '15:00') {
+  if (!Array.isArray(burst?.accounting?.minutes)) return null;
+  const seen = new Set();
+  const rows = burst.accounting.minutes.filter(r => {
+    const key = r[0] + '/' + r[1];
+    const available = !burst.replay || !r[5] || Date.parse(r[5]) <= Date.parse(burst.date + 'T' + cutoff + ':00+08:00');
+    if (!available || r[4] > cutoff || seen.has(key) || !Number.isFinite(r[2])) return false;
+    seen.add(key); return true;
+  });
+  const gross = rows.reduce((total, r) => total + r[2], 0) / 1e8;
+  const excess = rows.every(r => Number.isFinite(r[3])) ? rows.reduce((total, r) => total + Math.max(r[2] - r[3], 0), 0) / 1e8 : null;
+  const symbols = burst.symbols || [];
+  const core = seed?.core_fund_daily;
+  const sameUniverse = symbols.length > 0 && symbols.length === core?.rows?.length && core.rows.every(r => symbols.includes(r.symbol));
+  const archived = burst.daily_flow;
+  let flow = null;
+  if (burst.replay && cutoff < '15:00') {
+    return { gross, excess, flow, ratio: null, minutes: rows.length };
+  }
+  if (archived?.date === burst.date && archived.unit === 'CNY') {
+    const values = symbols.map(s => archived.by_symbol?.[s]?.flow_cny);
+    if (values.length && values.every(Number.isFinite)) flow = values.reduce((a, b) => a + b, 0) / 1e8;
+  } else if (core?.date === burst.date) {
+    const values = symbols.map(s => core.rows.find(r => r.symbol === s)?.flow);
+    if (values.length && values.every(Number.isFinite)) flow = values.reduce((a, b) => a + b, 0);
+  } else if (sameUniverse) {
+    const i = seed.history?.dates?.indexOf(burst.date) ?? -1;
+    if (i >= 0 && seed.history.flow_coverage?.[i] === symbols.length && seed.history.flow_expected?.[i] === symbols.length && Number.isFinite(seed.history.netflow?.[i])) flow = seed.history.netflow[i];
+  }
+  return { gross, excess, flow, ratio: Number.isFinite(flow) && gross > 0 ? flow / gross : null, minutes: rows.length };
+}
 const LEVELS = ['', '预警', '确认', '极端放量'];
 export function burstAnnouncement(event) {
   const signal = event?.peak || {};
@@ -6,7 +41,7 @@ export function burstAnnouncement(event) {
   // Speak the code character by character. A raw "510330" is read by many
   // TTS engines as the number 510,330; Chinese digits force a string reading.
   const spoken = code.replace(/[0-9]/g, digit => '零一二三四五六七八九'[digit]);
-  const raw = signal.amount ?? signal.volume;
+  const raw = signal.amount;
   const amount = Number.isFinite(raw) && raw > 0 ? (raw / 1e8).toFixed(2) + '亿元' : '成交额待齐';
   const rawTime = String(signal.end || event?.last || '');
   const time = rawTime ? rawTime.replace(':', '点') + '分' : '时间待齐';

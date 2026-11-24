@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fundStartDate,strictCumulative,cumulativeWindow} from '../src/assets/flow-math.js';
+import {fundStartDate,strictCumulative,cumulativeWindow,summarizeFlowComparison,groupFlowComparison} from '../src/assets/flow-math.js';
 import {fundDaily,aggregateFunds,FLOW_POLICY} from '../src/server/model.js';
 test('interval cumulative stops at the first gap and cannot hide later outflows',()=>{
  assert.deepEqual(strictCumulative([3,null,-100,8]),[3,null,null,null]);
@@ -14,6 +14,17 @@ test('coverage counts valid later dates while keeping whole-interval cumulative 
 test('a selected complete interval restarts cumulative at its own first day',()=>{
  const r=cumulativeWindow(['2026-04-29','2026-04-30'],[-10,5]);assert.deepEqual(r.values,[-10,-5]);assert.equal(r.missingDays,0);assert.equal(r.cumulativeThrough,'2026-04-30');
  assert.equal(cumulativeWindow(['2026-04-28'],[null]).lastCompleteRange,null);
+});
+test('ETF comparison totals share one paired population and preserve real zero',()=>{
+ const rows=[
+  {day:'2026-11-19',symbol:'A',active_buy_yi:0,active_sell_yi:0,net_flow_yi:-2},
+  {day:'2026-11-20',symbol:'A',active_buy_yi:18,active_sell_yi:7,net_flow_yi:null},
+  {day:'2026-11-20',symbol:'B',active_buy_yi:8,active_sell_yi:3,net_flow_yi:5},
+ ];
+ assert.deepEqual(summarizeFlowComparison(rows),{buy:8,sell:3,flow:3,gap:5,paired:2,total:3});
+ assert.deepEqual(groupFlowComparison(rows,'symbol')[0],{label:'A',buy:0,sell:0,flow:-2,gap:2,paired:1,total:2});
+ assert.deepEqual(groupFlowComparison(rows,'day')[1],{label:'2026-11-20',buy:8,sell:3,flow:5,gap:3,paired:1,total:2});
+ assert.deepEqual(summarizeFlowComparison(rows.slice(1,2)),{buy:null,sell:null,flow:null,gap:null,paired:0,total:1});
 });
 test('fund eligibility uses the later of inception and listing dates',()=>{
  assert.equal(fundStartDate({inception_date:'2026-04-09',listed_date:'2026-04-28'}),'2026-04-28');

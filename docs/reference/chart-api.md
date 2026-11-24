@@ -5,9 +5,10 @@
 | 图表 | RQData 方法与字段 |
 |---|---|
 | 分时成交额、指数走势、累计成交、20/60 日雷达 | 盘中：`LiveMarketDataClient` 的 `bar_`/`tick_` 推送；启动或断线时用 `rqdatac.get_price(frequency="1m", adjust_type="none")` 补齐；历史样本用 `get_price("1m")`，统一 240 点时间轴 |
-| ETF 表格、盘中总览 | `rqdatac.current_snapshot` 的 `last` 和 `total_turnover`，涨跌幅按上一交易日日线收盘计算 |
+| ETF 表格、盘中总览 | 实时采集使用 `LiveMarketDataClient` 的 `tick_`：`last`、`total_turnover`、`bid`、`ask`、`iopv`、`datetime`；涨跌幅按上一交易日日线收盘计算。经 `/api/live/stream` 约每秒合并推送，断开时每 2 秒读缓存。普通历史回放可无盘口字段 |
 | ETF 历史成交额、指数日线和各标的前收 | `rqdatac.get_price(frequency="1d", adjust_type="none")`，取 `total_turnover`、`close` |
 | 核心与宽基净申赎、分类表、放量与常态日划分 | `rqdatac_fund.fund.get_daily_units`、`fund.get_nav`、`fund.get_split`，取份额、单位净值与折算事件 |
+| ETF 盘中主动成交与日末净申赎 | `/api/etf-flow-comparison` 读取历史专题快照。盘中用 RQData Tick 成交额、成交量与买卖一盘口判向；日末沿用份额、净值及折算口径。单位为亿元 |
 | 宽基日末规模 | `fund.get_daily_units` 的同日份额 × `fund.get_nav` 的原始单位净值，换算为亿元 |
 | 宽基收盘折溢价 | `rqdatac.get_price(frequency="1d", adjust_type="none")` 的 `close` 和 `volume`，以及 `fund.get_nav` 的同日原始单位净值 |
 | 交易日及日期窗口 | `rqdatac.get_trading_dates` |
@@ -23,6 +24,10 @@
 - 日末规模是当日范围内各成员规模之和。全部跟踪类别与单类别独立计算，所选范围有缺数则留空。
 - 收盘折溢价为 `(不复权收盘价 / 同日原始单位净值 - 1) × 100`，有效成员须有正成交量和有效价格、净值。组合为有效样本等权均值，显示有效数及应纳入数。最新指标日可按基金查看排序。跨境基金若将来纳入配置，需确认价格与净值为同一币种。
 - Python 后端的 `/api/board` 在 `broad_metrics` 返回规模和折溢价。序列与 `broad.dates` 对齐，`members` 对应各指标的 `latest`。旧快照可继续打开，新增视图提示更新快照。
+
+### 主动成交与净申赎对照
+
+「历史资金」面板包含每日标的明细、按标的汇总和按日期汇总。日期筛选含首尾，标的筛选对三个视图同时生效。差额为主动买成交额减日末净申赎，汇总只纳入三个金额均有效的标的日，表中显示有效配对数。该面板使用导入的 RQData 专题快照。页面日频源切换后仍可按同一份复盘数据复核。详见[数据口径](flow-methodology.md#主动成交与净申赎对照)和[导入操作](../operations/runbook.md#35-日度主动成交与申赎对照)。
 
 ## 相关文档
 

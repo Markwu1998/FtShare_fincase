@@ -17,6 +17,7 @@ Python 网页服务提供两个平级入口。ETF 资金观测台（`/`）用于
 - **发现成交异动**：对照20日、60日历史同进度成交，观察累计放量与短时放量；支持阈值调整和时点回放。
 - **比较盘中节奏**：将今日分钟成交与放量日、常态日对照，结合上证指数和核心ETF表现复盘。
 - **跟踪宽基资金**：查看 12 类宽基 ETF 的申赎表、净申赎合计、日末规模和收盘折溢价，按时间窗口或自选日期比较。
+- **对照主动成交与净申赎**。在「历史资金」按日期或标的查看确认放量窗口的主动买、主动卖、日末净申赎和差额。导入与覆盖说明见[日度对照操作](docs/operations.md#35-日度主动成交与申赎对照)。
 - **观察市场拥挤度**：查看前 1%／3%／5% 个股成交额占比、沪深300／中证1000市值与成交额比值，以及定期更新的行业、公募持仓和融资指标。
 - **持续查看市场**：行情自动刷新，多人共享同一份行情缓存。支持手机浏览、深浅主题和文字导航。
 
@@ -68,8 +69,10 @@ $env:PORT = '8080'
 & .\scripts\python-backend.ps1 web
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看 ETF 演示样本。市场拥挤度页面需在真实数据模式下加载独立快照，配置见 [Python 后端](docs/getting-started/live-setup.md)。
+打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看 ETF 演示样本。市场拥挤度、逐只 ETF 事件回放及主动成交对照需要 `live` 模式与相应私有归档，配置见 [Python 后端](docs/getting-started/live-setup.md)。
 
 [图表接口](docs/reference/chart-api.md) · [数据与计算](docs/reference/flow-methodology.md) · [参与开发](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
+
+[盘中异动：金额累计、事件日志、秒级候选与回放](docs/reference/tick-driver.md) · [成交额与日末申赎的研究口径](docs/research/etf-intraday-factor-review-20261121.md)
 
 [MIT 开源许可](LICENSE) · [第三方许可](THIRD_PARTY_NOTICES.md)

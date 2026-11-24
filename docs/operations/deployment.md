@@ -36,6 +36,10 @@
 - 容器多实例部署需要共享存储，并把采集任务部署到独立的常驻或定时运行环境。
 - 网页按文件版本热加载，数据更新不需要重启 FastAPI。
 
+## 跨机器迁移
+
+按数据授权迁移日频与拥挤度快照、`ETF_BURST_DIR` 归档，以及 `data/private/etf-flow-comparison.json` 专题快照。Windows 本机加密凭据在目标机器重新配置。`live` 模式应分别核验 `/api/board` 与 `/api/etf-flow-comparison` 的可用性；专题快照的口径和导入见[日度对照操作](runbook.md#35-日度主动成交与申赎对照)。
+
 ## 小程序 / 移动端
 
 同一套 Python 后端与只读 API 可通过 HTTPS 域名供小程序访问。正式上线时由反向代理对外提供授权范围内的 API，Uvicorn 继续监听本机地址；按平台要求配置合法域名与备案。

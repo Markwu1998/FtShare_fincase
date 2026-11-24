@@ -3,6 +3,7 @@ from asyncio import sleep
 from contextlib import suppress
 from datetime import datetime, timezone
 import json
+from hashlib import sha256
 from math import sin
 import os
 import re
@@ -13,10 +14,12 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from .burst import DEFAULT_DIR as BURST_DIR
+from .burst import DEFAULT_DIR as BURST_DIR, validate_metric
+from .burst_ledger import read_journal
 from .collect import ROOT, read
 from .crowding import DEFAULT_PATH as CROWDING_PATH, validate_snapshot as validate_crowding
 from .crowding_extra import MODULES, path_for, validate_extra
+from .flow_comparison import DEFAULT_PATH as FLOW_COMPARISON_PATH, validate_archive as validate_flow_comparison
 from .model import BASKET, CATEGORIES, DEFAULT_STATUS, FORMULA, SLOTS, finite
 from .provider import CHINA
 from .sources import load_config as load_source_config, realtime_entries, source_descriptions, source_entries
@@ -124,13 +127,14 @@ def validate_cache(value):
 
 
 def validate_burst(value):
+    validate_metric(value)
     if value["provider"] != "RQData" or not isinstance(value["events"], list) or not value["updated_at"]:
         raise ValueError("Invalid ETF event archive")
     return value
 
 
 def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_replay=None, crowding_file=None,
-               burst_dir=None):
+               burst_dir=None, flow_comparison_file=None):
     mode = mode or os.environ.get("DATA_MODE", "demo")
     if mode not in {"demo", "live"}:
         raise ValueError("Invalid DATA_MODE")
@@ -175,6 +179,7 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                         for module in MODULES}
     event_dir = ROOT / (burst_dir or os.environ.get("ETF_BURST_DIR") or BURST_DIR)
     events = Archive(event_dir / "live.json", validate_burst)
+    flow_comparison = Archive(ROOT / (flow_comparison_file or FLOW_COMPARISON_PATH), validate_flow_comparison)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     index = (ROOT / "src/index.html").read_text(encoding="utf-8").replace(
         'data-data-mode="demo"', f'data-data-mode="{mode}"').replace(
@@ -215,8 +220,8 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             except OSError:
                 return None
 
-        key = (today, tuple((source_id, file_version(archives[source_id].path))
-                            for source_id in archives))
+        key = (today, int(datetime.now(CHINA).timestamp()) // 30, file_version(cache_path), tuple((source_id, file_version(archives[source_id].path))
+                                                    for source_id in archives))
         with status_lock:
             if status_cache["key"] == key:
                 return status_cache["value"]
@@ -238,10 +243,10 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             ready = meta.get("readiness", "ready") == "ready"
             reason = meta.get("reason")
             if expected and (seed.get("latest_flow_date") or "") < expected:
-                ready = False
+                ready = ready and source_id == "rqdata"
                 reason = f"最新份额 {seed.get('latest_flow_date') or '无'}，目标 {expected}"
             elif expected and (seed.get("latest_market_date") or "") < expected:
-                ready = False
+                ready = ready and source_id == "rqdata"
                 reason = f"最新行情 {seed.get('latest_market_date') or '无'}，目标 {expected}"
             values.append({"id": source_id, "label": entry.get("label", seed.get("provider", source_id)),
                            "kind": "daily", "ready": ready,
@@ -249,13 +254,16 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                            "latest_market_date": seed.get("latest_market_date"),
                            "latest_flow_date": seed.get("latest_flow_date"),
                            "built_at": seed.get("built_at"),
+                           "stale": bool(reason),
                            "capabilities": meta.get("capabilities") or entry.get("capabilities", []),
                            "descriptions": source_descriptions(source_id),
                            "reason": reason})
         realtime = []
         for entry in realtime_entries_list:
             realtime.append({"id": entry["id"], "label": entry.get("label", entry["id"]), "kind": "realtime",
-                             "ready": entry["id"] == "rqdata" and cache.load() is not None,
+                             "ready": entry["id"] == "rqdata" and bool(cache.load()) and
+                                      cache.load()["value"].get("date") == today and
+                                      not cache.load()["value"].get("replay"),
                              "default": entry["id"] == realtime_default,
                              "capabilities": entry.get("capabilities", [])})
         result = {"default": default_source, "realtime_default": realtime_default,
@@ -264,6 +272,70 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             status_cache["key"] = key
             status_cache["value"] = result
         return result
+
+    def live_response(request):
+        realtime_id = request.query_params.get("realtime_source") or realtime_default
+        if realtime_id != "rqdata":
+            return error("未知或尚未接入的实时行情源", "realtime_source_unknown", 400)
+        entry = cache.load() or {}
+        live = entry.get("value")
+        if live is None:
+            seed = archive.load()
+            live = seed.get("live_snapshot") if seed else None
+        if not live or live.get("provider") != "RQData" or live.get("slots") != SLOTS:
+            return error("后台行情尚未就绪；历史图表可继续查看", "cache_not_ready", 503)
+        replay = bool(live.get("replay"))
+        now = datetime.now(CHINA)
+        if replay and not allow_replay or not replay and live.get("date") != now.date().isoformat():
+            return error("等待当日盘中行情", "cache_not_ready", 503)
+        try:
+            observed = datetime.fromisoformat(live["fetched_at"].replace("Z", "+00:00"))
+            hm = now.strftime("%H:%M")
+            in_session = now.weekday() < 5 and ("09:30" <= hm <= "11:30" or "13:00" <= hm <= "15:05")
+            lag = (now - observed).total_seconds()
+            if observed.utcoffset() is None or lag < -2:
+                raise ValueError("Invalid quote time")
+            stale = not replay and in_session and lag > 180
+        except (KeyError, TypeError, ValueError):
+            return error("盘中行情时间无效", "cache_not_ready", 503)
+        if live.get("table"):
+            rows = []
+            for row in live["table"]:
+                try:
+                    age = max(0, (now - datetime.fromisoformat(row["quote_at"].replace("Z", "+00:00"))).total_seconds())
+                except (KeyError, TypeError, ValueError):
+                    age = None
+                rows.append({**row, "quote_stale": not replay and in_session and (age is None or age > 90)})
+            live = {**live, "table": rows}
+        return response({**live, "cache": {"mode": "background", "collected_at": live["fetched_at"],
+                         "checked_at": entry.get("checked_at"), "stale": stale,
+                         "last_error": entry.get("last_error"), "refresh_seconds": 1 if live.get("feed") == "push" else 60}},
+                        provider="RQData")
+
+    @app.get("/api/live/stream")
+    async def live_stream(request: Request):
+        if demo:
+            return error("演示数据不提供实时行情流", "live_disabled", 404)
+        async def stream():
+            previous = request.headers.get("last-event-id", "")[:160]
+            while not await request.is_disconnected():
+                result = await run_in_threadpool(live_response, request)
+                value = json.loads(result.body)
+                if value.get("replay"):
+                    result = error("历史回放请使用回放接口", "replay_not_live", 409)
+                    value = json.loads(result.body)
+                # Include availability transitions as well as quote versions.
+                version = value.get("published_at") or value.get("fetched_at") or value.get("code")
+                version = f"{result.status_code}/{version}/{value.get('cache', {}).get('stale')}"
+                if previous != version:
+                    previous = version
+                    event = "live" if result.status_code == 200 else "unavailable"
+                    yield f"id: {version}\nevent: {event}\ndata: {result.body.decode('utf-8')}\n\n"
+                else:
+                    yield ": heartbeat\n\n"
+                await sleep(1)
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     def current_events():
         snapshot = events.load()
@@ -299,6 +371,22 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             return HTMLResponse(index, headers={"Cache-Control": "no-cache"})
         if key in {"/crowding", "/crowding/"}:
             return HTMLResponse(crowding_page, headers={"Cache-Control": "no-cache"})
+        if key == '/api/etf-burst/journal':
+            if demo or not radar:
+                return error('盘中放量监控未启用', 'burst_disabled', 404)
+            day = request.query_params.get('date', '')
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+                return error('查询日期无效', 'invalid_date', 400)
+            try:
+                after = int(request.query_params.get('after', '0'))
+                limit = int(request.query_params.get('limit', '200'))
+                if after < 0 or not 1 <= limit <= 1000:
+                    raise ValueError()
+            except ValueError:
+                return error('分页参数无效', 'invalid_query', 400)
+            rows = read_journal(event_dir / 'journals' / f'{day}.sqlite3', after, limit,
+                                request.query_params.get('symbol'), request.query_params.get('kind'))
+            return response({'date': day, 'rows': rows, 'next_after': rows[-1]['seq'] if rows else after})
         if key in {"/api/etf-burst", "/api/etf-burst/dates"}:
             if demo or not radar:
                 return error("盘中放量监控未启用", "burst_disabled", 404)
@@ -315,6 +403,9 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             else:
                 snapshot = current_events()
             return response(snapshot) if snapshot else error("暂无盘中放量归档", "burst_not_ready", 503)
+        if key == "/api/etf-flow-comparison":
+            value = None if demo else flow_comparison.load()
+            return response(value) if value is not None else error("盘中主动买与日末申赎尚未归档", "flow_comparison_not_ready", 503)
         if key.startswith("/api/crowding/"):
             module = key.removeprefix("/api/crowding/")
             if module not in crowding_modules:
@@ -348,6 +439,8 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
             return error("页面不存在", "not_found", 404)
         if key == "/api/sources":
             return response(source_status())
+        if key == "/api/live" and not demo:
+            return live_response(request)
         requested_source = request.query_params.get("source")
         source_id = requested_source or default_source
         status_map = {item["id"]: item for item in source_status()["sources"]}
@@ -377,8 +470,12 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                              "cloud_update": seed.get("cloud_update"), "update_policy": DEFAULT_STATUS},
                             provider=provider_label)
         if key == "/api/board":
-            return response(seed if demo else {**seed, "update_policy": DEFAULT_STATUS},
-                            provider=provider_label)
+            etag = '"' + sha256(str((source_id, selected.version)).encode()).hexdigest() + '"'
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+            result = response(seed if demo else {**seed, "update_policy": DEFAULT_STATUS}, provider=provider_label)
+            result.headers.update({"ETag": etag, "Cache-Control": "no-cache"})
+            return result
         if key == "/api/history":
             history = seed["history"]
             return response({"provider": provider_label, "rows": [{"date": d, "amount": a, "idx": i} for d, a, i in
@@ -405,33 +502,7 @@ def create_app(mode=None, seed_file=None, cache_file=None, *, radar=None, allow_
                 for f in seed["universe"][offset:offset + 8]]}, provider=provider_label)
         if demo:
             return response(demo_live(seed), provider="Demo")
-        realtime_id = request.query_params.get("realtime_source") or realtime_default
-        realtime_entry = next((item for item in realtime_entries_list if item["id"] == realtime_id), None)
-        if realtime_entry is None:
-            return error("未知的实时行情源", "realtime_source_unknown", 400)
-        if realtime_id != "rqdata":
-            return error("该实时行情源尚未接入", "realtime_source_not_ready", 409)
-        realtime_label = realtime_entry.get("label", "RQData")
-        entry = cache.load() or {}
-        live = entry.get("value") or seed.get("live_snapshot")
-        if live and live.get("provider") == realtime_label and live.get("slots") == seed["minute_slots"] and (
-                allow_replay or not live.get("replay")):
-            replay = bool(live.get("replay")) and allow_replay
-            if not replay and live.get("date") != datetime.now(CHINA).date().isoformat():
-                # A new trading day starts empty: never show yesterday's intraday as today's.
-                return error("等待当日盘中行情", "cache_not_ready", 503)
-            try:
-                fetched_at = datetime.fromisoformat(live["fetched_at"].replace("Z", "+00:00"))
-                cn = datetime.now(CHINA)
-                in_session = cn.weekday() < 5 and "09:30" <= cn.strftime("%H:%M") <= "15:05"
-                # After the close the last snapshot is final, not stale.
-                stale = in_session and (datetime.now(timezone.utc) - fetched_at).total_seconds() > 180
-            except (KeyError, TypeError, ValueError):
-                return error("盘中行情时间无效", "cache_not_ready", 503)
-            return response({**live, "cache": {"mode": "background", "collected_at": live["fetched_at"],
-                             "checked_at": entry.get("checked_at"), "stale": stale, "last_error": entry.get("last_error"),
-                             "refresh_seconds": 60}}, provider=live.get("provider"))
-        return error("后台行情尚未就绪；历史图表可继续查看", "cache_not_ready", 503)
+        return error("接口不存在", "not_found", 404)
 
     @app.middleware("http")
     async def headers(request, call_next):

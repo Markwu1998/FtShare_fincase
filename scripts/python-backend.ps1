@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay', 'tick-baseline', 'day-replay')][string]$Mode,
     [string]$ReplayCache,
     [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
 )
@@ -41,13 +41,22 @@ try {
         $port = if ($env:PORT) { $env:PORT } else { '8080' }
         & $python -B -m uvicorn etf_backend.web:app --host $address --port $port @Arguments
     } else {
-        if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE -and !($Arguments -match '^--burst-input(?:=|$)')) {
+        $localReplay = $Arguments -match '^--burst-input(?:=|$)' -or
+            ($Mode -eq 'tick-baseline' -and ($Arguments -match '^--input-dir(?:=|$)')) -or
+            ($Mode -eq 'day-replay' -and ($Arguments -match '^(--offline|--source=ddb)$'))
+        if (!$env:RQDATAC2_CONF -and !$env:RQDATAC_CONF -and $env:RQDATA_CREDENTIAL_FILE -and !$localReplay) {
             $secure = ConvertTo-SecureString ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $env:RQDATA_CREDENTIAL_FILE).Path))
             $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
             try { $env:RQDATAC2_CONF = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
             finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
         }
-        & $python -B -m etf_backend.collect $Mode @Arguments
+        if ($Mode -eq 'tick-baseline') {
+            & $python -B scripts/prepare-tick-baseline.py @Arguments
+        } elseif ($Mode -eq 'day-replay') {
+            & $python -B -X utf8 scripts/replay-burst-day.py @Arguments
+        } else {
+            & $python -B -m etf_backend.collect $Mode @Arguments
+        }
     }
     exit $LASTEXITCODE
 } finally {
