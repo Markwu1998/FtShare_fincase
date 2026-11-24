@@ -23,7 +23,7 @@
 - `update_extra` 对行业/融资无新交易日数据时直接失败，不再静默发布旧快照。
 - 前端来源切换增加请求序号，避免快速切换时旧请求覆盖新状态；来源相关纯函数拆到 `data-source.js`。
 - 新增 DDB 状态、行业日度、陈旧快照、来源选择/URL 生成和 provider header 测试。
-- **ETF 日频默认数据源切换为 DDB**；08:20 `update-daily-all.ps1` 同时构建 RQData 与 DDB，再更新日度拥挤度、融资、行业；12:30 只补 ETF/DDB；周六只检查公募。
+- **ETF 日频默认数据源切换为 DDB**；09:10 `update-daily-all.ps1` 同时构建 RQData 与 DDB，再更新日度拥挤度、融资、行业；12:30 只补 ETF/DDB；周六只检查公募。
 - 行业拥挤度由周度改为**日度**：按日计算指数成分、市值占比和成交额占比，行业分类按周缓存；已重建 `rqdata-crowding-industry.json`（247 个交易日，至 2026-11-18）。
 - 拥挤度页面按日度/周度/季度分别显示频率；不再做盘中定时刷新，打开或手动刷新读取最新快照。
 - `update-sources.ps1` 将 crowding 与 ETF 历史解耦：需要时可独立执行；RQData/DDB 失败不会影响显式的 crowding 更新。

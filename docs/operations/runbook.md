@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | 网页服务 | `scripts/python-backend.ps1 web` | 8080 | 只读 | FastAPI；ETF 页 `/`，拥挤度页 `/crowding` |
 | 盘中采集器 | `scripts/python-backend.ps1 -Mode live -Arguments @('--watch')` | 无 | 只写 | RQData 推送；09:15 预载基准，09:30 订阅 |
-| 日频更新 | `scripts/update-daily-all.ps1` | 无 | 只写 | 每日 08:20 总更新 / 12:30 补采；RQData + DDB 双源 |
+| 日频更新 | `scripts/update-daily-all.ps1` | 无 | 只写 | 每日 09:10 总更新 / 12:30 补采；RQData + DDB 双源 |
 | 逐 ETF 放量 | 由采集器自动写入 | 无 | 只写 | `etf-burst/live.json` + 每日归档 |
 | 拥挤度 | `scripts/python-backend.ps1 crowding` | 无 | 只写 | 四个独立归档，按模块增量 |
 | 主动成交与申赎对照 | `python -m etf_backend.flow_comparison <CSV>` | 无 | 导入写入 | 从专题回放 CSV 生成独立私有快照 |
@@ -25,7 +25,7 @@
 
 - 网页**只读文件**，快照更新后按 `mtime` 自动热加载，**不需要重启**。
 - 盘中缓存由采集器写，网页不直接访问 RQData；Tick 报价经 `/api/live/stream` 约每秒合并推送，失败时每 2 秒读缓存。正式放量默认使用供应商分钟 bar，Tick 聚合、候选与切换条件见 [Tick 监控](../reference/tick-driver.md)。
-- 日频数据存在「披露延迟」：`08:20` 更新的是**上一交易日**，当天数据要等收盘后披露。
+- 日频数据存在「披露延迟」：`09:10` 更新的是**上一交易日**，当天数据要等收盘后披露。
 - 日切：`/api/live` 只返回**当日**（Asia/Shanghai）缓存；盘前或跨日后返回 503，页面自动刷新后盘中区域为空，09:30 新缓存到达后恢复。
 - 页头新鲜度：显示最新行情分钟、本地时间和延时；盘中延时 >90 秒变黄，>180 秒变红告警；午休/收盘显示中性的“午间休市/已收盘”。
 - 日频源可选 `RQData` 或 `DDB`，**当前默认 DDB**；页面按源读取对应 seed，不重启服务；DDB 的 `fund_etf_nr` 未覆盖全部核心 ETF 或行情日期落后时自动标记未就绪，`/api/board?source=ddb` 返回 409。
@@ -96,18 +96,18 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 
 | 建议任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频与拥挤度 08:20` | 周一至周五 08:20 | `update-daily-all.ps1`：RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 |
+| `ETF 日频与拥挤度更新 09:10` | 周一至周五 09:10 | `update-daily-all.ps1`：RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 |
 | `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding`（RQData + 可选 DDB），补晚披露 |
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页与采集器，输出状态 |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，用当日 1m 线补全到 15:00 |
 
-08:20 总更新任务同时构建 RQData 与 DDB，并更新拥挤度；12:30 仍保留 ETF/DDB 晚披露补采。
+09:10 总更新任务同时构建 RQData 与 DDB，并更新拥挤度；12:30 仍保留 ETF/DDB 晚披露补采。
 
 说明：
 
 - 推荐目标服务器使用操作系统调度器直接调用脚本；DSH 等外部调度器可选，任务状态需在实际使用的调度器中检查。
-- `setup-tasks.cmd` 是可选的 Windows 安装入口，只有显式运行才注册 4 个任务：08:20 与 12:30 执行 `update-daily.cmd`，登录时启动网页/采集器。它不包含上表的拥挤度、公募及收盘补全任务，也不会配置 09:20 总更新；完整方案须在目标机单独配置。
+- `setup-tasks.cmd` 是可选的 Windows 安装入口，只有显式运行才注册 4 个任务：08:20 与 12:30 执行 `update-daily.cmd`，登录时启动网页/采集器。它不包含上表的拥挤度、公募及收盘补全任务，也不会配置 09:10 总更新；完整方案须在目标机单独配置。
 - 每个采集模块仅保留一个调度入口，避免重复启动或并发写入同一归档。
 
 > 若 Windows 任务注册失败（受限环境会返回「拒绝访问」），可在「任务计划程序」手工创建：操作 `cmd.exe`，参数 `/c "完整路径\xxx.cmd"`，起始于项目根目录。
@@ -130,7 +130,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 |---|---|---|
 | 登录时 | 启动网页 + 采集器 | Windows 任务（可选）或手动 |
 | 08:25 | 检查并启动网页/采集器 | DSH `ETF 开盘前启动 08:25` |
-| 08:20 | RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 | DSH `ETF 日频与拥挤度 08:20` |
+| 09:10 | RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 | DSH `ETF 日频与拥挤度更新 09:10` |
 | 周六 09:00 | 公募（季度）更新 | DSH `ETF 周六公募拥挤度` |
 | 09:15–09:30 | 采集器预载 60 日分钟基准 | 采集器 |
 | 09:30–15:02 | 实时推送，写盘中缓存 | 采集器 |
@@ -413,5 +413,5 @@ Unregister-ScheduledTask -TaskName FtShare-UpdateDaily -Confirm:$false
 | 端口统一 8080 | README、文档、启动脚本、`.env.example` 一致 |
 | `.env` UTF-8 | 启动脚本按 UTF-8 读取，中文注释不再吞行 |
 | 运维脚本 | `start-web.cmd`、`start-collector.cmd`、`update-daily.cmd`、`setup-tasks.cmd`、`status.cmd` |
-| DSH 定时任务 | 08:20 总更新、12:30 补采、08:25 开盘前启动 |
+| DSH 定时任务 | 09:10 总更新、12:30 补采、08:25 开盘前启动 |
 | 采集器心跳 | `data/private/collector.heartbeat`，`start-collector.cmd` 据此防止重复启动 |

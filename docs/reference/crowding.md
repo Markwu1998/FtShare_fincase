@@ -45,7 +45,7 @@ data/private/rqdata-crowding-financing.json  融资与估值，日度
 
 | 北京时间 | 模块 | 命令 |
 |---|---|---|
-| 每天 08:20 | 成交额集中度 / 大小盘风格 + 融资 + 行业 | `update-daily-all.ps1`（同时构建 RQData/DDB ETF） |
+| 每天 09:10 | 成交额集中度 / 大小盘风格 + 融资 + 行业 | `update-daily-all.ps1`（同时构建 RQData/DDB ETF） |
 | 每周六 09:00 | 公募基金重仓集中度 | `python -m etf_backend.collect crowding --crowding-module=funds` |
 
 Windows 可用任务计划程序；Linux 可用 systemd oneshot + timer，`OnCalendar` 显式指定 `Asia/Shanghai`。采集器与 FastAPI 必须使用同一个 `CROWDING_FILE` 基础路径。

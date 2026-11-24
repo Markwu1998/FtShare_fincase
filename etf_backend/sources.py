@@ -262,26 +262,35 @@ class DDBAdapter:
             frame = self.query(
                 "select TICKER_SYMBOL,max(TRADE_DATE) as maxd "
                 "from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
-                f"where TICKER_SYMBOL in {core!r} and TRADE_DATE={dot(target)} "
-                "and SHARES>0 and NAV>0 group by TICKER_SYMBOL")
+                f"where TICKER_SYMBOL in {core!r} and TRADE_DATE<={dot(target)} "
+                "group by TICKER_SYMBOL")
             per_symbol = {str(row["TICKER_SYMBOL"]): str(row["maxd"])[:10]
                           for _, row in frame.iterrows()} if len(frame) else {}
             market = self.query(
                 "select TICKER_SYMBOL,max(TRADE_DATE) as maxd from loadTable('dfs://hermes_etf_data','mkt_fundd') "
-                f"where TICKER_SYMBOL in {core!r} and TRADE_DATE={dot(target)} "
+                f"where TICKER_SYMBOL in {core!r} and TRADE_DATE<={dot(target)} "
                 "and CLOSE_PRICE>0 and TURNOVER_VALUE>=0 group by TICKER_SYMBOL")
             market_dates = {str(row["TICKER_SYMBOL"]): str(row["maxd"])[:10]
                             for row in market.to_dict("records")}
             market_latest = min(market_dates.values()) if market_dates else None
+            latest = min(per_symbol.values()) if per_symbol else None
+            # 调用方传入的是日历昨日；周一对应周日。只有目标日完全没有份额记录
+            # 时才回退到最近已观察交易日，目标日存在记录时仍按旧口径失败关闭。
             target_rows = self.query(
                 "select TICKER_SYMBOL,SHARES,NAV from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
                 f"where TRADE_DATE={dot(target)} and TICKER_SYMBOL in {core!r}")
+            effective = target
+            if not len(target_rows) and latest and latest <= target:
+                effective = latest
+                target_rows = self.query(
+                    "select TICKER_SYMBOL,SHARES,NAV from loadTable('dfs://hermes_etf_data','fund_etf_nr') "
+                    f"where TRADE_DATE={dot(effective)} and TICKER_SYMBOL in {core!r}")
             target_values = {str(row["TICKER_SYMBOL"]): (row["SHARES"], row["NAV"])
                              for _, row in target_rows.iterrows()} if len(target_rows) else {}
         except Exception as error:
             return SourceStatus(self.id, self.label, False, reason=f"DDB 查询失败：{type(error).__name__}")
         missing = [symbol for symbol in core if symbol not in per_symbol]
-        stale = [symbol for symbol in core if symbol in per_symbol and per_symbol[symbol] < target]
+        stale = [symbol for symbol in core if symbol in per_symbol and per_symbol[symbol] < effective]
         def positive(value):
             try:
                 number = float(value)
@@ -291,7 +300,6 @@ class DDBAdapter:
         invalid = [symbol for symbol in core
                    if symbol not in target_values
                    or not positive(target_values[symbol][0]) or not positive(target_values[symbol][1])]
-        latest = min(per_symbol.values()) if per_symbol else None
         if missing:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
@@ -299,16 +307,16 @@ class DDBAdapter:
         if stale:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
-                                reason=f"fund_etf_nr 有 {len(stale)} 只核心 ETF 未到 {target}")
+                                reason=f"fund_etf_nr 有 {len(stale)} 只核心 ETF 未到 {effective}")
         if invalid:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
                                 reason=f"fund_etf_nr 有 {len(invalid)} 只核心 ETF 份额/净值无效")
-        missing_market = [symbol for symbol in core if market_dates.get(symbol, "") < target]
+        missing_market = [symbol for symbol in core if market_dates.get(symbol, "") < effective]
         if missing_market:
             return SourceStatus(self.id, self.label, False, latest_market_date=market_latest,
                                 latest_flow_date=latest,
-                                reason=f"mkt_fundd 有 {len(missing_market)} 只核心 ETF 缺少 {target} 有效行情")
+                                reason=f"mkt_fundd 有 {len(missing_market)} 只核心 ETF 缺少 {effective} 有效行情")
         return SourceStatus(self.id, self.label, True, latest_market_date=market_latest,
                             latest_flow_date=latest)
 

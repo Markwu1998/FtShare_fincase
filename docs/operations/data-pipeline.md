@@ -67,7 +67,7 @@
 
 | 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频与拥挤度 08:20` | 周一至周五 08:20 | `update-daily-all.ps1`（RQData + DDB） |
+| `ETF 日频与拥挤度更新 09:10` | 周一至周五 09:10 | `update-daily-all.ps1`（RQData + DDB） |
 | `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页/采集器 |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding` |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close` |

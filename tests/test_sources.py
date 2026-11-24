@@ -26,6 +26,10 @@ class FakeDDB:
             return pd.DataFrame({"TICKER_SYMBOL": list(self.flow_dates),
                                  "maxd": [pd.Timestamp(day) for day in self.flow_dates.values()]})
         if "where TRADE_DATE=" in sql:
+            import re
+            day = re.search(r"TRADE_DATE=([0-9.]+)", sql).group(1).replace(".", "-")
+            if day not in self.flow_dates.values():
+                return pd.DataFrame(columns=["TICKER_SYMBOL", "SHARES", "NAV"])
             return pd.DataFrame({"TICKER_SYMBOL": list(self.flow_dates),
                                  "SHARES": [None if symbol in self.invalid else 1.0 for symbol in self.flow_dates],
                                  "NAV": [1.0] * len(self.flow_dates)})
@@ -88,6 +92,16 @@ class SourceMetadataTest(unittest.TestCase):
         status = adapter.status(target)
         self.assertFalse(status.ready)
         self.assertIn("未到", status.reason)
+
+    def test_ddb_status_uses_latest_session_before_weekend_target(self):
+        adapter = DDBAdapter(self.config)
+        core = adapter._core()
+        friday = "2026-11-20"
+        adapter._session = FakeDDB({symbol: friday for symbol in core}, friday)
+        # Monday's calendar-yesterday is Sunday; the adapter must use Friday.
+        status = adapter.status("2026-11-22")
+        self.assertTrue(status.ready)
+        self.assertEqual(status.latest_flow_date, friday)
 
     def test_ddb_status_rejects_missing_shares(self):
         adapter = DDBAdapter(self.config)

@@ -66,7 +66,7 @@ DDB 的 `ready` 规则：
 ## 构建
 
 ```powershell
-# 同时构建两个源（当前 08:20 定时任务使用）
+# 同时构建两个源（当前 09:10 定时任务使用）
 & .\scripts\update-daily-all.ps1
 
 # 单独构建 RQData
