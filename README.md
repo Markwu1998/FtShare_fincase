@@ -6,7 +6,7 @@
 
 Python 网页服务提供两个平级入口。ETF 资金观测台（`/`）用于观察盘中交易和 ETF 资金变化，市场拥挤度观测台（`/crowding`）用于跟踪沪深 A 股成交集中度、大小盘风格、指数行业、公募重仓及融资宏观指标。
 
-[Python 启动、采集与回放](docs/getting-started/live-setup.md) · [运行与运维手册](docs/operations/runbook.md) · [文档目录](docs/index.md) · [RQData 官方文档](https://www.ricequant.com/doc/rqdata/python/index-rqdatac)
+[项目指南](docs/overview/project-guide.md) · [Python 启动、采集与回放](docs/getting-started/live-setup.md) · [运行与运维手册](docs/operations/runbook.md) · [文档目录](docs/index.md) · [RQData 官方文档](https://www.ricequant.com/doc/rqdata/python/index-rqdatac)
 
 **ETF 异动雷达（20/60 日双基准） · 20 只核心 ETF · 12 类宽基 · 9 张分析图 · 市场拥挤度观测台**
 

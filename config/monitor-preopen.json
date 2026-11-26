@@ -1,0 +1,14 @@
+{
+  "basket_file": "config/basket.json",
+  "universe_file": "config/universe.json",
+  "burst_config_file": "config/etf-burst.json",
+  "output": "data/private/monitor-preopen/{date}/monitor-preopen.json",
+  "prepare_tick_references": true,
+  "archives": {
+    "etf_daily": "data/private/ddb-seed.json",
+    "market_concentration": "data/private/rqdata-crowding.json",
+    "market_industry": "data/private/rqdata-crowding-industry.json",
+    "market_funds": "data/private/rqdata-crowding-funds.json",
+    "market_financing": "data/private/rqdata-crowding-financing.json"
+  }
+}

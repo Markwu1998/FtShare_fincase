@@ -63,7 +63,7 @@
 
 ## 定时任务
 
-当前由 DSH 定时任务驱动：
+以下是目标机可采用的调度配置。Windows 任务计划程序、DSH 或 Linux systemd 等调度器均需在目标机单独配置。
 
 | 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
@@ -71,7 +71,7 @@
 | `ETF 开盘前启动 09:14` | 周一至周五 09:14 | 检查 8080，必要时启动网页/采集器 |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding` |
 | `ETF 收盘补全 15:10` | 周一至周五 15:10 | 已停用；由夜间 DDB 复盘替代 |
-| `ETF 夜间 DDB 复盘 22:00` | 周一至周五 22:00 | `update-flow-replay.ps1 -Source ddb` + 当日 flow comparison |
+| `ETF 夜间 DDB 复盘 22:00` | 周一至周五 22:00 | `update-flow-replay.ps1 -Source ddb` 生成并镜像回放 JSON |
 | `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
 
 采集器为常驻进程：09:15 自动切换新交易日，15:02 后空闲；每天写 `data/private/collector.heartbeat`，`start-collector.cmd` 依据心跳避免重复启动。

@@ -7,6 +7,7 @@ from pathlib import Path
 from .model import finite
 
 FACTOR_VERSION = 'tick-persistence-v1'
+REFERENCE_SECONDS = (*range(34205, 41401, 5), *range(46805, 53821, 5))
 
 
 def load_references(path, day, as_of, q):
@@ -87,12 +88,16 @@ def candidates(aggregator, baseline, references, symbol, now):
 
 def build_references(frame, calendar, q):
     """Offline preparation from 60 prior trading days of actual historical Tick."""
-    import numpy as np
-    import pandas as pd
-    import warnings
     if len(calendar) != 60 or not finite(q) or not 0 < q < 1:
         raise ValueError('Expected exactly 60 prior trading dates and a valid quantile')
-    grid = np.r_[np.arange(34205, 41401, 5), np.arange(46805, 53821, 5)]
+    return references_from_matrix(reference_matrix(frame, calendar), q)
+
+
+def reference_matrix(frame, calendar):
+    """Reduce actual Tick history to five-second deltas, retaining gaps as NaN."""
+    import numpy as np
+    import pandas as pd
+    grid = np.array(REFERENCE_SECONDS)
     groups = {d: g for d, g in frame.groupby(frame.index.strftime('%Y-%m-%d'))}
     matrix = []
     for day in calendar:
@@ -110,7 +115,16 @@ def build_references(frame, calendar, q):
             safe = np.maximum(offsets, 0)
             return np.where((offsets >= 0) & (target - rows.index.asi8[safe] <= 6_000_000_000), cash[safe], np.nan)
         matrix.append(lookup(grid) - lookup(grid - 5))
-    matrix = np.array(matrix)
+    return np.array(matrix)
+
+
+def references_from_matrix(matrix, q):
+    """Use the same 20/60-day quantiles for batch and streamed preparation."""
+    import numpy as np
+    import warnings
+    if matrix.shape != (60, len(REFERENCE_SECONDS)) or not finite(q) or not 0 < q < 1:
+        raise ValueError('Expected exactly 60 prior trading dates and a valid quantile')
+    grid = np.array(REFERENCE_SECONDS)
     output = {}
     for length in (5, 30, 60):
         n = length // 5

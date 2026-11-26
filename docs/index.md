@@ -4,10 +4,11 @@
 
 主运行方式：**RQData + Python 后端**（ETF 日频默认 DDB，RQData 可回退）。带「历史」标记的文档位于 `archive/`，仅供本地追溯，不随发布包分发。
 
-## 先读这三篇
+## 项目入门
 
 | 文档 | 内容 |
 |---|---|
+| [项目指南](overview/project-guide.md) | 功能、数据流、使用、复盘、部署及全 Python 改造评估 |
 | [项目定位](overview/product.md) | 两个观测台、功能地图、运行边界 |
 | [系统架构](overview/architecture.md) | 进程、数据流、模块边界、关键决策 |
 | [快速开始](getting-started/quickstart.md) | 演示模式 5 分钟跑通 |
@@ -29,6 +30,7 @@
 | [单日 ETF 异动复盘](operations/runbook.md#34-单日-etf-异动复盘) | RQData 历史 ETF 与期货 Tick、基准准备、离线续跑与回放 |
 | [日度主动成交与申赎对照](operations/runbook.md#35-日度主动成交与申赎对照) | 私有 CSV 导入、日期与标的筛选、配对汇总 |
 | [数据管线](operations/data-pipeline.md) | 增量更新、收盘补全、回放、定时任务 |
+| [Aces 监控日初准备](operations/monitor-preopen.md) | 独立 JSON、DDB 基准生成、覆盖校验与生产运行方式 |
 | [备份、恢复与升级](operations/backup-and-upgrade.md) | 备份、迁移、升级回滚 |
 | [网络与主机配置](operations/network-security.md) | HTTPS、反向代理、暴露面 |
 
@@ -57,6 +59,7 @@
 | 文档 | 内容 |
 |---|---|
 | [仓库目录](development/repo-layout.md) | 目录与模块职责 |
+| [Aces IndexArb 监控窗口设计](development/indexarb-etf-burst.md) | ETF 异动与市场集中度窗口、策略列、共享行情及验收 |
 | [测试](development/testing.md) | Python/Node 测试命令与要求 |
 | [发布与验证](development/release.md) | 检查清单、公开发布边界、v0.1.0 记录 |
 

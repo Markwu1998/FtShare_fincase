@@ -33,6 +33,7 @@
 | `collection.json` | `flow_start`、`market_start`、`minute_days`、`concurrency` | 影响历史起点与分钟样本量 |
 | `data-sources.json` | 日频源注册、默认源、能力矩阵 | 影响页面数据源下拉与就绪判断 |
 | `etf-burst.json` | 放量分位参数、可选的 `symbols` 覆盖 | 影响逐 ETF 事件阈值 |
+| `monitor-preopen.json` | 独立监控日初准备的输入、输出与归档路径 | 供 DDB 生成脚本使用，与 IndexArb 日频因子分开；见[操作说明](../operations/monitor-preopen.md) |
 
 核心篮子的唯一来源是 `config/basket.json`。不要直接改 `etf_backend/constants.json` 或 `src/server/model.js`，使用 `scripts/basket.py` 校验并同步：
 

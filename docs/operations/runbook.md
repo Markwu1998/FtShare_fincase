@@ -19,7 +19,7 @@
 | 日频更新 | `scripts/update-daily-all.ps1` | 无 | 只写 | 每日 09:10 总更新 / 12:30 补采；RQData + DDB 双源 |
 | 逐 ETF 放量 | 由采集器自动写入 | 无 | 只写 | `etf-burst/live.json` + 每日归档 |
 | 拥挤度 | `scripts/python-backend.ps1 crowding` | 无 | 只写 | 四个独立归档，按模块增量 |
-| 主动成交与申赎对照 | `python -m etf_backend.flow_comparison <CSV>` | 无 | 导入写入 | 从专题回放 CSV 生成独立私有快照 |
+| 主动成交与申赎对照 | `python -m etf_backend.flow_comparison <CSV>` 或 `--merge` | 无 | 导入写入 | 从专题 CSV 导入或按回放日期合并独立私有快照 |
 
 **关键事实：**
 
@@ -101,9 +101,9 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding`（RQData + 可选 DDB），补晚披露 |
 | `ETF 开盘前启动 09:14` | 周一至周五 09:14 | 检查 8080，必要时启动网页与采集器，输出状态 |
 | `ETF 收盘补全 15:10` | 已停用，由夜间 DDB 复盘替代 |
-| `ETF 夜间 DDB 复盘 22:00` | 周一至周五 22:00 | `update-flow-replay.ps1 -Source ddb`，生成 DDB replay 并尝试合并当日 flow comparison |
+| `ETF 夜间 DDB 复盘 22:00` | 周一至周五 22:00 | `update-flow-replay.ps1 -Source ddb` 生成并归档指定日 DDB 回放 JSON |
 
-09:10 总更新任务同时构建 RQData 与 DDB，并更新拥挤度和上一交易日 flow comparison；22:00 只生成当日 DDB replay，并在 DDB 日末净申赎齐全时合并当日对照，未齐则留到次日 09:10 补齐。
+09:10 总更新任务构建 RQData 与 DDB 快照，更新拥挤度，并从上一交易日回放合并主动成交对照。22:00 回放脚本发布回放 JSON。若希望夜间直接合并当日对照，在回放成功后另行调用 `update-flow-comparison.ps1 -Day <交易日期>`，合并需要全部核心 ETF 的日末净申赎可用。
 
 说明：
 
@@ -119,7 +119,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 .\status.cmd
 ```
 
-预期：`8080` 返回 `RQData / live`、快照日期正确、交易时段缓存有当日分钟。只有在目标机主动安装任务后才检查相应任务状态；本地未注册任务属正常情况。
+预期为 `8080` 返回 `DDB / live` 或 `RQData / live`，快照日期正确，交易时段缓存有当日分钟。只有在目标机主动安装任务后才检查相应任务状态。
 
 ---
 
@@ -137,7 +137,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 | 09:30–15:02 | 实时推送，写盘中缓存 | 采集器 |
 | 12:30 | 第二次日频增量（RQData + 可选 DDB，`-SkipCrowding`） | DSH `ETF 日频补采 12:30` |
 | 15:02 后 | 采集器空闲，等下一交易日 | 采集器 |
-| 22:00 | 生成当日 DDB replay，DDB 净申赎齐全时合并 flow comparison | DSH `ETF 夜间 DDB 复盘 22:00` |
+| 22:00 | 生成并归档指定日 DDB 回放 JSON | 部署机夜间回放任务 |
 
 ### 3.2 手动启动 / 停止
 
@@ -193,17 +193,17 @@ Windows 在项目根目录执行以下命令。填写完整交易日期，每次
    & .\scripts\python-backend.ps1 web
    ```
 
-已下载的数据可用 `--input-dir` 和 `--offline` 在新输出目录重跑。RQData 历史 Tick 默认按行情时间复盘；保存了真实接收时间的文件才可用接收时钟。30／60 秒候选另需目标日前的秒级基准。DDB 模式待 ETF 和股指期货完整 Tick 接口接入。输入字段、离线示例和基准准备见 [Tick 数据回放](../reference/tick-driver.md#tick-数据回放)。复盘按需运行。
+已下载的数据可用 `--input-dir` 和 `--offline` 在新输出目录重跑。RQData 历史 Tick 默认按行情时间复盘，保存了真实接收时间的输入才可用接收时钟。30／60 秒候选另需目标日前的秒级基准。输入字段、离线示例和基准准备见 [Tick 数据回放](../reference/tick-driver.md#tick-数据回放)。
 
-雷达回放时点设为 15:00，可查看同篮子日末净申赎及覆盖数。份额未齐时，页面显示已覆盖小计，归档 `daily_flow.by_symbol` 保留逐标的金额和缺数原因。日末披露补齐后，沿用原 Tick 输入目录，用 RQData 联网模式和新的输出目录重跑。完全离线重跑时，将 `inputs/fund-flow.json` 与 Tick 输入一起提供。
+雷达回放时点设为 15:00，可查看同篮子日末净申赎及覆盖数。份额未齐时，页面显示已覆盖小计，归档 `daily_flow.by_symbol` 保留逐标的金额和缺数原因。使用 RQData 时，可在披露补齐后沿用原 Tick 输入目录，在新输出目录联机重跑。完全离线重跑时，将 `inputs/fund-flow.json` 与 Tick 输入一起提供。
 
 ### 3.5 日度主动成交与申赎对照
 
 在 ETF 资金观测台的「历史资金」中选择「ETF 盘中主动成交与日末净申赎」。起止日期均包含，标的下拉可切到单只 ETF。「每日明细」「按标的汇总」「按日期汇总」共用筛选条件。
 
-盘中主动买卖使用 RQData Tick 区间均价与上一档盘口中点的方向估算。统计范围为确认放量窗口的并集。日末净申赎为同标的同日的份额变化乘单位净值估算。差额等于主动买减日末净申赎。汇总金额仅累计三个字段均有效的记录，配对数标记汇总的覆盖。已回放且无确认放量的标的日，主动买卖为零。缺份额时，明细仍显示有效的盘中买卖金额，净申赎和差额留空。
+盘中主动买卖按 Tick 区间均价与上一条快照的买一／卖一中点估算，支持 RQData 专题历史导入和 DDB 盘口构建。统计范围为确认放量窗口的并集。日末净申赎为同标的同日的份额变化乘单位净值估算。差额等于主动买减日末净申赎。汇总金额仅累计三个字段均有效的记录，配对数标记汇总的覆盖。已回放且无确认放量的标的日，主动买卖为零。缺份额时，明细仍显示有效的盘中买卖金额，净申赎和差额留空。
 
-自动链路：每日 22:00 由 `scripts/update-flow-replay.ps1 -Source ddb` 生成 DDB 单日 replay，并镜像到 `data/private/etf-burst/replay/<日期>.json` 供“单只 ETF · 盘中集中交易”回放；若 DDB 当日 20/20 日末净申赎已齐，则同时合并 `data/private/etf-flow-comparison.json`，否则保持 pending，次日 09:10 继续补齐。
+目标机可在 22:00 执行 `scripts/update-flow-replay.ps1 -Source ddb`，将 DDB 单日回放复制到 `data/private/etf-burst/replay/<日期>.json` 供「单只 ETF · 盘中集中交易」使用。次日的 `update-daily-all.ps1` 另行合并 `data/private/etf-flow-comparison.json`。回放 JSON 可先供雷达使用，对照合并需要 20／20 核心 ETF 的净申赎。
 
 用中点灰区专题回放的 `etf_daily_series.csv` 导入完整目标区间，字段见[数据与计算](../reference/flow-methodology.md#主动成交与净申赎对照)。标准 `day-replay` 写入单日雷达 JSON 和日志。主动成交对照使用独立的标的日 CSV。以下为本地 2026-08-20 至 2026-11-20 示例，使用项目的 Python 环境执行，命令会原子替换私有快照。`.local` 研究输出按授权随部署迁移。
 
@@ -231,6 +231,17 @@ python -m etf_backend.ddb_replay --days "<回放日1>,<回放日2>,..." --out .l
 网页从 `data/private/etf-flow-comparison.json` 读取已导入的日期。重新导入后刷新页面即可查看更新。迁移应用时将该快照放到目标项目的数据目录。
 
 ---
+
+### 3.6 Aces 独立监控日初准备
+
+使用 `monitor-preopen` 生成独立 JSON，不写 IndexArb 日频因子，也不注册计划任务：
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode monitor-preopen -Arguments @('--day=2026-11-26')
+& .\scripts\python-backend.ps1 -Mode monitor-preopen -Arguments @('--day=2026-11-26','--check')
+```
+
+使用现有 DDB 连接环境变量，历史输入严格早于目标日。覆盖、退出码及未来 Aces 读取方式见[监控日初准备](monitor-preopen.md)。
 
 ## 4. 数据与目录
 
@@ -308,7 +319,7 @@ $env:PORT = '8086'
 & .\scripts\python-backend.ps1 history -Arguments @('--source','ddb','--recent')
 ```
 
-- 源注册在 `config/data-sources.json`，默认 `rqdata`；
+- 源注册在 `config/data-sources.json`，网页日频默认 `ddb`。
 - DDB 构建前会检查核心 20 只的 `fund_etf_nr` 最后日期；不满足目标日期直接失败，不覆盖旧 seed；
 - 页面读取 `/api/sources` 显示就绪状态，切换无需重启；
 - 双源顺序构建可执行 `scripts/update-sources.ps1`（DDB 失败只告警，不阻断 RQData）。
