@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay', 'tick-baseline', 'day-replay')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('web', 'history', 'live', 'crowding', 'burst-replay', 'tick-baseline', 'day-replay', 'flow-comparison')][string]$Mode,
     [string]$ReplayCache,
     [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
 )
@@ -54,6 +54,8 @@ try {
             & $python -B scripts/prepare-tick-baseline.py @Arguments
         } elseif ($Mode -eq 'day-replay') {
             & $python -B -X utf8 scripts/replay-burst-day.py @Arguments
+        } elseif ($Mode -eq 'flow-comparison') {
+            & $python -B -m etf_backend.flow_comparison @Arguments
         } else {
             & $python -B -m etf_backend.collect $Mode @Arguments
         }

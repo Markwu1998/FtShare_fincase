@@ -78,6 +78,38 @@ class BackendTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 validate_archive({**archive, "rows": archive["rows"] + [first]})
 
+    def test_flow_comparison_builds_midpoint_band_rows_from_replay(self):
+        import pandas as pd
+        from etf_backend.flow_comparison import build_rows, validate_archive
+
+        day, symbol = "2026-11-20", BASKET[0]
+
+        class Session:
+            def run(self, sql):
+                return pd.DataFrame({
+                    "MDTime": [pd.Timestamp(f"1970-01-01T10:00:0{offset}") for offset in (0, 3, 6)],
+                    "SecurityID": [symbol] * 3,
+                    "TotalValueTrade": [0, 3e12, 6.3e12],
+                    "TotalVolumeTrade": [0, 3e8, 6e8],
+                    "BidPx": [10000, 10000, 10000],
+                    "AskPx": [10010, 10010, 10010],
+                })
+
+        report = {"date": day, "symbols": list(BASKET),
+                  "accounting": {"minutes": [[symbol, "10:00", 6.3e8, None, "10:00", "2026-11-20T10:01:00+08:00"]]},
+                  "daily_flow": {"by_symbol": {code: {"flow_cny": 2e8, "issues": []} for code in BASKET}}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            publish(root / day / "replay" / f"{day}.json", report)
+            rows = build_rows(root, session=Session())
+        first = next(row for row in rows if row["symbol"] == symbol)
+        self.assertAlmostEqual(first["gross_yi"], 6.3)
+        self.assertAlmostEqual(first["active_sell_yi"], 3)
+        self.assertAlmostEqual(first["active_buy_yi"], 3.3)
+        self.assertAlmostEqual(first["net_flow_yi"], 2)
+        self.assertEqual(validate_archive({"schema_version": 1, "method": "rqdata-l1-midpoint-band-v1",
+                                           "unit": "CNY_1e8", "rows": rows})["rows"], rows)
+
     def test_push_updates_existing_board_and_separate_burst_archive(self):
         from datetime import datetime, timedelta
         from unittest.mock import patch

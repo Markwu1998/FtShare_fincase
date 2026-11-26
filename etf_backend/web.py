@@ -128,7 +128,7 @@ def validate_cache(value):
 
 def validate_burst(value):
     validate_metric(value)
-    if value["provider"] != "RQData" or not isinstance(value["events"], list) or not value["updated_at"]:
+    if value["provider"] not in {"RQData", "DDB"} or not isinstance(value["events"], list) or not value["updated_at"]:
         raise ValueError("Invalid ETF event archive")
     return value
 

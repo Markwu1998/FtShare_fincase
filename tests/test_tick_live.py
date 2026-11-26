@@ -13,11 +13,23 @@ from etf_backend.burst import BurstDay, END, RULE_VERSION, total_window, validat
 from etf_backend.collect import publish, read, ROOT
 from etf_backend.model import BASKET, INDEX, SLOTS, fund_flows
 from etf_backend.provider import CHINA
-from etf_backend.realtime import PushSession
+from etf_backend.realtime import PushSession, etf_quote_direction
 from etf_backend.web import create_app, validate_burst
 
 
 class TickLiveTest(unittest.TestCase):
+    def test_etf_quote_direction_classifies_buy_and_sell_trades(self):
+        start = datetime(2026, 11, 25, 9, 30, tzinfo=CHINA)
+        tape = [
+            (start, 10.10, 10.00, 10.05, 100, 10.05),
+            (start + timedelta(seconds=1), 10.10, 10.00, 10.05, 200, 10.10),
+            (start + timedelta(seconds=2), 10.10, 10.00, 10.05, 300, 9.99),
+        ]
+        result = etf_quote_direction(tape)
+        self.assertEqual(result["side"], "buy")
+        self.assertGreater(result["buy_cny"], result["sell_cny"])
+        self.assertEqual(result["coverage"], 2)
+
     def test_unknown_split_without_reconciliation_preserves_a_flow_gap(self):
         fund = {"symbol": "510050.SH", "listed_date": "2005-01-01", "inception_date": "2004-01-01"}
         records = {"shares": [["2026-11-12", 100], ["2026-11-13", 110]],
@@ -90,6 +102,9 @@ class TickLiveTest(unittest.TestCase):
         value = BurstDay("2026-11-13", {}, .75, symbols=[]).payload()
         self.assertEqual(validate_burst(value)["unit"], "CNY")
         self.assertEqual(value["rule_version"], "turnover-p75-v1")
+        self.assertEqual(validate_burst(BurstDay("2026-11-13", {}, .75, symbols=[], provider="DDB").payload())["provider"], "DDB")
+        with self.assertRaises(ValueError):
+            validate_burst({**value, "provider": "Unknown"})
 
     def test_daily_board_etag_skips_unchanged_payload(self):
         app = create_app("demo")

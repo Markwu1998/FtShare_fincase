@@ -127,7 +127,16 @@ RQData 联网复盘另取目标日和上一交易日的期末份额、单位净�
 
 「历史资金」里的主动成交与日末净申赎对照使用独立的标的日专题归档。它采用 ETF 盘口中点灰区口径，单日雷达的期货方向证据使用上文的触及盘口规则。两个界面的金额粒度和输入分别见[对照数据口径](flow-methodology.md#主动成交与净申赎对照)及[导入操作](../operations/runbook.md#35-日度主动成交与申赎对照)。
 
-**DDB 待办**。命令预留 `--source=ddb`。目前缺少完整 ETF 和股指期货 Tick 接口，选择 DDB 会明确报未接入。接入时还需对齐交易所时区、接收时间、累积成交额/成交量、持仓量、买卖一价、历史分钟/日基准及当日挂牌合约名单。
+**DDB 模式**。`--source=ddb` 直接从 DolphinDB 读取 ETF 与股指期货 Tick，不依赖 RQData。ETF 快照取 `dfs://MD.MDSnapshot`（`LastPx`、`TotalValueTrade` 除以 10000 还原价格与元，`TotalVolumeTrade` 为股），期货取 `dfs://futures_tick.futures_tick_data`（价格与金额已是元，`Volume`/`Turnover` 为当日累计，`OpenInt` 为持仓，`BidPrice[0]`/`AskPrice[0]` 为买卖一），日成交额取 `mkt_fundd.TURNOVER_VALUE`，期末份额/净值/折算取 `fund_etf_nr`。两次快照间的累计成交额差（先除以 10000 还原为元）得到分钟额；13:00 无成交，以 11:30 收盘快照作为下午首分钟的起点。DDB 没有独立的接收时刻，只能用 `--clock=market`；指定 `--clock=received` 或 `--tick-factor-baseline` 需要预先准备带接收时间的输入。DDB 回放的归档 `provider` 写为 `DDB`，`fund-flow.json` 保留同一来源标记；网页校验同时接受 `RQData` 与 `DDB`。
+
+```powershell
+& .\scripts\python-backend.ps1 -Mode day-replay -Arguments @(
+  '--day=2026-11-20', '--source=ddb', '--symbols', '510050.SH')
+```
+
+首次运行会在目标日前 60 个交易日上从 Tick 聚合分钟额并生成与 RQData 结构一致的 `baseline.json`，同时写出 `etf/`、`futures/`、`contracts.json` 和 `fund-flow.json`。之后可用 `--offline --input-dir` 复用这些文件。挂出的合约按到期顺序取每个品种最近四个；不足四个会明确报错。
+
+多日回放不必逐日重复聚合历史：`python -m etf_backend.ddb_replay --days "<日期,...>" --out <基准目录>` 一次聚合共享的 60 日历史，并按每个回放日写出 `baseline.json`。已有回放目录时，`python -m etf_backend.flow_comparison --from-replay <回放目录> --out <CSV>` 可据确认窗口分钟并集与 DDB 买一/卖一中点灰区生成主动成交与日末净申赎对照 CSV，再按[导入操作](../operations/runbook.md#35-日度主动成交与申赎对照)写入私有快照。
 
 `burst-replay --burst-input` 保留原成交额分钟导入；输入额外含 `ticks` 时使用同一个 Tick 聚合器重放。`1m`/`1d` 仍用于构造截至前一交易日的基准，不能省略历史样本而冒充基准充分。
 

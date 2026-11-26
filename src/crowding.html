@@ -1,127 +1,128 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f2f6f6">
-<title>市场拥挤度观测台</title>
+<title>甯傚満鎷ユ尋搴﹁娴嬪彴</title>
 <script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
-<link rel="stylesheet" href="/style.css?v=20261120c">
+<link rel="stylesheet" href="/style.css?v=20261126a">
 <script src="/echarts.min.js" defer></script>
-<script src="/assets/presentation.js?v=20261120c" type="module"></script>
-<script src="/assets/crowding.js?v=20261120c" type="module"></script>
+<script src="/assets/presentation.js?v=20261126a" type="module"></script>
+<script src="/assets/crowding.js?v=20261126a" type="module"></script>
 </head>
 <body>
-<button class="nav-backdrop" id="navBackdrop" aria-label="关闭图表导航" hidden></button>
-<aside class="chart-sidebar" id="chartNavigation" aria-label="图表导航">
-  <div class="sidebar-heading"><span class="sidebar-mark" aria-hidden="true">↗</span><div><strong>图表导航</strong></div><button id="chartNavClose" class="sidebar-close" type="button" aria-label="关闭图表导航">×</button></div>
-  <nav class="chart-directory" aria-label="图表目录">
-    <div class="directory-group"><a class="directory-section" href="#marketConcentration">成交额集中度</a><a href="#marketConcentrationChart">集中度与指数</a></div>
-    <div class="directory-group"><a class="directory-section" href="#marketStyle">大小盘风格</a><a href="#marketCapitalChart">总市值比值</a><a href="#marketTurnoverChart">成交额比值</a></div>
-    <div class="directory-group"><a class="directory-section" href="#marketIndustry">指数行业拥挤度</a><a href="#marketIndustryChart">行业占比走势</a></div>
-    <div class="directory-group"><a class="directory-section" href="#marketFunds">公募重仓集中度</a><a href="#marketFundChart">重仓行业走势</a></div>
-    <div class="directory-group"><a class="directory-section" href="#marketFinancing">融资与市场估值</a><a href="#marketBalanceChart">融资余额与净增</a><a href="#marketLeverageChart">融资增速与占比</a><a href="#marketValuationChart">市值与宏观比值</a></div>
+<button class="nav-backdrop" id="navBackdrop" aria-label="鍏抽棴鍥捐〃瀵艰埅" hidden></button>
+<aside class="chart-sidebar" id="chartNavigation" aria-label="鍥捐〃瀵艰埅">
+  <div class="sidebar-heading"><span class="sidebar-mark" aria-hidden="true">鈫?/span><div><strong>鍥捐〃瀵艰埅</strong></div><button id="chartNavClose" class="sidebar-close" type="button" aria-label="鍏抽棴鍥捐〃瀵艰埅">脳</button></div>
+  <nav class="chart-directory" aria-label="鍥捐〃鐩綍">
+    <div class="directory-group"><a class="directory-section" href="#marketConcentration">鎴愪氦棰濋泦涓害</a><a href="#marketConcentrationChart">闆嗕腑搴︿笌鎸囨暟</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketStyle">澶у皬鐩橀鏍?/a><a href="#marketCapitalChart">鎬诲競鍊兼瘮鍊?/a><a href="#marketTurnoverChart">鎴愪氦棰濇瘮鍊?/a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketIndustry">鎸囨暟琛屼笟鎷ユ尋搴?/a><a href="#marketIndustryChart">琛屼笟鍗犳瘮璧板娍</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketFunds">鍏嫙閲嶄粨闆嗕腑搴?/a><a href="#marketFundChart">閲嶄粨琛屼笟璧板娍</a></div>
+    <div class="directory-group"><a class="directory-section" href="#marketFinancing">铻嶈祫涓庡競鍦轰及鍊?/a><a href="#marketBalanceChart">铻嶈祫浣欓涓庡噣澧?/a><a href="#marketLeverageChart">铻嶈祫澧為€熶笌鍗犳瘮</a><a href="#marketValuationChart">甯傚€间笌瀹忚姣斿€?/a></div>
   </nav>
-  <a class="sidebar-top" href="#top">返回概览 <span>↑</span></a>
+  <a class="sidebar-top" href="#top">杩斿洖姒傝 <span>鈫?/span></a>
 </aside>
 <main class="wrap">
   <header class="top" id="top">
     <div class="top-line">
       <a class="brand" href="#top"><span>ETF<span class="brand-product">CROWDING</span></span></a>
       <div class="header-actions">
-        <div class="theme-switch crowding-theme" role="group" aria-label="切换主题">
-          <button type="button" data-theme-choice="light">浅色</button>
-          <button type="button" data-theme-choice="dark">深色</button>
-          <button type="button" data-theme-choice="system">系统</button>
+        <div class="theme-switch crowding-theme" role="group" aria-label="鍒囨崲涓婚">
+          <button type="button" data-theme-choice="light">娴呰壊</button>
+          <button type="button" data-theme-choice="dark">娣辫壊</button>
+          <button type="button" data-theme-choice="system">绯荤粺</button>
         </div>
       </div>
     </div>
     <!-- observatory-switch -->
-    <div class="hero-heading"><div><h1>市场拥挤度观测台<span class="title-dot">.</span></h1></div><span class="market-label"><i></i>中国市场 · 沪深 A 股</span></div>
+    <div class="hero-heading"><div><h1>甯傚満鎷ユ尋搴﹁娴嬪彴<span class="title-dot">.</span></h1></div><span class="market-label"><i></i>涓浗甯傚満 路 娌繁 A 鑲?/span></div>
     <div class="overview">
-      <a class="metric-card" href="#marketConcentration"><span class="metric-label">前 1% 成交额占比</span><strong id="marketTop1">—</strong><span class="metric-foot" id="marketTopDate"></span></a>
-      <a class="metric-card" href="#marketConcentration"><span class="metric-label">前 1% 成交额占比 · 历史分位</span><strong id="marketPercentile">—</strong><span class="metric-foot" id="marketSample"></span></a>
-      <a class="metric-card" href="#marketCapitalChart"><span class="metric-label">沪深300 / 中证1000 · 总市值</span><strong id="marketCapRatio">—</strong><span class="metric-foot" id="marketCapDate"></span></a>
-      <a class="metric-card" href="#marketTurnoverChart"><span class="metric-label">沪深300 / 中证1000 · 成交额</span><strong id="marketCashRatio">—</strong><span class="metric-foot" id="marketCashDate"></span></a>
+      <a class="metric-card" href="#marketConcentration"><span class="metric-label">鍓?1% 鎴愪氦棰濆崰姣?/span><strong id="marketTop1">鈥?/strong><span class="metric-foot" id="marketTopDate"></span></a>
+      <a class="metric-card" href="#marketConcentration"><span class="metric-label">鍓?1% 鎴愪氦棰濆崰姣?路 鍘嗗彶鍒嗕綅</span><strong id="marketPercentile">鈥?/strong><span class="metric-foot" id="marketSample"></span></a>
+      <a class="metric-card" href="#marketCapitalChart"><span class="metric-label">娌繁300 / 涓瘉1000 路 鎬诲競鍊?/span><strong id="marketCapRatio">鈥?/strong><span class="metric-foot" id="marketCapDate"></span></a>
+      <a class="metric-card" href="#marketTurnoverChart"><span class="metric-label">娌繁300 / 涓瘉1000 路 鎴愪氦棰?/span><strong id="marketCashRatio">鈥?/strong><span class="metric-foot" id="marketCashDate"></span></a>
     </div>
-    <p class="data-note" id="marketStatus" role="status">正在读取市场日度快照</p>
+    <p class="data-note" id="marketStatus" role="status">姝ｅ湪璇诲彇甯傚満鏃ュ害蹇収</p>
   </header>
-  <nav class="section-nav" aria-label="看板导航">
-    <div class="nav-sections"><a href="#marketConcentration">成交额集中度</a><a href="#marketStyle">大小盘风格</a><a href="#marketIndustry">行业拥挤度</a><a href="#marketFunds">公募重仓</a><a href="#marketFinancing">融资与估值</a></div>
-    <button class="chart-nav-toggle" id="chartNavToggle" type="button" aria-controls="chartNavigation" aria-expanded="false">图表导航</button>
+  <nav class="section-nav" aria-label="鐪嬫澘瀵艰埅">
+    <div class="nav-sections"><a href="#marketConcentration">鎴愪氦棰濋泦涓害</a><a href="#marketStyle">澶у皬鐩橀鏍?/a><a href="#marketIndustry">琛屼笟鎷ユ尋搴?/a><a href="#marketFunds">鍏嫙閲嶄粨</a><a href="#marketFinancing">铻嶈祫涓庝及鍊?/a></div>
+    <button class="chart-nav-toggle" id="chartNavToggle" type="button" aria-controls="chartNavigation" aria-expanded="false">鍥捐〃瀵艰埅</button>
   </nav>
   <div class="broad-controls">
-    <label>图表范围
+    <label>鍥捐〃鑼冨洿
       <select id="marketDays">
-        <option value="20">近 20 个交易日</option><option value="60">近 60 个交易日</option>
-        <option value="125">近 125 个交易日</option><option value="250" selected>近 250 个交易日</option>
-        <option value="750">近 750 个交易日</option><option value="1250">近 1250 个交易日</option>
-        <option value="2500">近 2500 个交易日</option>
+        <option value="20">杩?20 涓氦鏄撴棩</option><option value="60">杩?60 涓氦鏄撴棩</option>
+        <option value="125">杩?125 涓氦鏄撴棩</option><option value="250" selected>杩?250 涓氦鏄撴棩</option>
+        <option value="750">杩?750 涓氦鏄撴棩</option><option value="1250">杩?1250 涓氦鏄撴棩</option>
+        <option value="2500">杩?2500 涓氦鏄撴棩</option>
       </select>
     </label>
   </div>
   <section class="part" id="marketConcentration">
-    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketConcentrationContent"><span>A 股成交额集中度</span><span class="collapse-label">收起</span></button></h2>
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketConcentrationContent"><span>A 鑲℃垚浜ら闆嗕腑搴?/span><span class="collapse-label">鏀惰捣</span></button></h2>
     <div class="section-content" id="marketConcentrationContent">
       <div class="broad-controls">
-        <label>档位 <select id="marketTier"><option value="1">前 1%</option><option value="3">前 3%</option><option value="5">前 5%</option></select></label>
-        <label>叠加指数 <select id="marketIndex"><option value="">无</option></select></label>
+        <label>妗ｄ綅 <select id="marketTier"><option value="1">鍓?1%</option><option value="3">鍓?3%</option><option value="5">鍓?5%</option></select></label>
+        <label>鍙犲姞鎸囨暟 <select id="marketIndex"><option value="">鏃?/option></select></label>
       </div>
-      <div class="chart-wrap"><div class="chart" id="marketConcentrationChart" aria-label="成交额集中度与指数走势"></div></div>
-      <details class="gap-report"><summary>数据与计算口径</summary><p>按当日沪深上市 A 股取数。有正成交额的股票参加排名，档位股数向上取整。分母为同一股票池成交额合计。已确认停牌按零成交处理，源数据缺失时该日留空。历史分位使用截至当日近五年已归档有效点，包含当日。</p></details>
+      <div class="chart-wrap"><div class="chart" id="marketConcentrationChart" aria-label="鎴愪氦棰濋泦涓害涓庢寚鏁拌蛋鍔?></div></div>
+      <details class="gap-report"><summary>鏁版嵁涓庤绠楀彛寰?/summary><p>鎸夊綋鏃ユ勃娣变笂甯?A 鑲″彇鏁般€傛湁姝ｆ垚浜ら鐨勮偂绁ㄥ弬鍔犳帓鍚嶏紝妗ｄ綅鑲℃暟鍚戜笂鍙栨暣銆傚垎姣嶄负鍚屼竴鑲＄エ姹犳垚浜ら鍚堣銆傚凡纭鍋滅墝鎸夐浂鎴愪氦澶勭悊锛屾簮鏁版嵁缂哄け鏃惰鏃ョ暀绌恒€傚巻鍙插垎浣嶄娇鐢ㄦ埅鑷冲綋鏃ヨ繎浜斿勾宸插綊妗ｆ湁鏁堢偣锛屽寘鍚綋鏃ャ€?/p></details>
       <div class="table-wrap">
-        <h3 id="marketTableTitle">日度明细</h3>
-        <div class="broad-controls"><label>表格范围
-          <select id="marketTableDays"><option value="5">近 5 个交易日</option><option value="20">近 20 个交易日</option><option value="60">近 60 个交易日</option><option value="125">近 125 个交易日</option><option value="250">近 250 个交易日</option></select>
+        <h3 id="marketTableTitle">鏃ュ害鏄庣粏</h3>
+        <div class="broad-controls"><label>琛ㄦ牸鑼冨洿
+          <select id="marketTableDays"><option value="5">杩?5 涓氦鏄撴棩</option><option value="20">杩?20 涓氦鏄撴棩</option><option value="60">杩?60 涓氦鏄撴棩</option><option value="125">杩?125 涓氦鏄撴棩</option><option value="250">杩?250 涓氦鏄撴棩</option></select>
         </label></div>
         <div class="tscroll">
-          <table><thead><tr><th>交易日</th><th class="num">入选股数</th><th class="num">档位成交额（亿元）</th><th class="num">集中度</th><th class="num">历史分位</th><th class="num">有成交 / 停牌 / 缺数</th></tr></thead><tbody id="marketTable"></tbody></table>
+          <table><thead><tr><th>浜ゆ槗鏃?/th><th class="num">鍏ラ€夎偂鏁?/th><th class="num">妗ｄ綅鎴愪氦棰濓紙浜垮厓锛?/th><th class="num">闆嗕腑搴?/th><th class="num">鍘嗗彶鍒嗕綅</th><th class="num">鏈夋垚浜?/ 鍋滅墝 / 缂烘暟</th></tr></thead><tbody id="marketTable"></tbody></table>
         </div>
       </div>
     </div>
   </section>
   <section class="part" id="marketStyle">
-    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketStyleContent"><span>大小盘风格</span><span class="collapse-label">收起</span></button></h2>
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketStyleContent"><span>澶у皬鐩橀鏍?/span><span class="collapse-label">鏀惰捣</span></button></h2>
     <div class="section-content" id="marketStyleContent">
-      <div class="chart-wrap"><div class="chart" id="marketCapitalChart" aria-label="沪深300与中证1000总市值比值"></div></div>
-      <div class="chart-wrap"><div class="chart" id="marketTurnoverChart" aria-label="沪深300与中证1000成交额比值"></div></div>
-      <details class="gap-report"><summary>数据与计算口径</summary><p>使用每个交易日生效的指数成分，分别汇总两组股票的总市值与成交额，再计算沪深300与中证1000的比值。任一成分缺数时对应指标留空。市值图的均值与 ±1σ、±2σ按所选区间有效日计算。</p></details>
+      <div class="chart-wrap"><div class="chart" id="marketCapitalChart" aria-label="娌繁300涓庝腑璇?000鎬诲競鍊兼瘮鍊?></div></div>
+      <div class="chart-wrap"><div class="chart" id="marketTurnoverChart" aria-label="娌繁300涓庝腑璇?000鎴愪氦棰濇瘮鍊?></div></div>
+      <details class="gap-report"><summary>鏁版嵁涓庤绠楀彛寰?/summary><p>浣跨敤姣忎釜浜ゆ槗鏃ョ敓鏁堢殑鎸囨暟鎴愬垎锛屽垎鍒眹鎬讳袱缁勮偂绁ㄧ殑鎬诲競鍊间笌鎴愪氦棰濓紝鍐嶈绠楁勃娣?00涓庝腑璇?000鐨勬瘮鍊笺€備换涓€鎴愬垎缂烘暟鏃跺搴旀寚鏍囩暀绌恒€傚競鍊煎浘鐨勫潎鍊间笌 卤1蟽銆伮?蟽鎸夋墍閫夊尯闂存湁鏁堟棩璁＄畻銆?/p></details>
     </div>
   </section>
   <section class="part" id="marketIndustry">
-    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketIndustryContent"><span>指数行业拥挤度</span><span class="collapse-label">收起</span></button></h2>
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketIndustryContent"><span>鎸囨暟琛屼笟鎷ユ尋搴?/span><span class="collapse-label">鏀惰捣</span></button></h2>
     <div class="section-content" id="marketIndustryContent">
       <div class="broad-controls">
-        <label>指数 <select id="industryIndex"><option value="000300.XSHG">沪深300</option><option value="000905.XSHG">中证500</option></select></label>
-        <label>指标 <select id="industryMetric"><option value="capital">市值占比</option><option value="turnover">成交额占比</option></select></label>
-        <label>行业 <select id="industryChoice"><option value="">每日第一行业</option></select></label>
+        <label>鎸囨暟 <select id="industryIndex"><option value="000300.XSHG">娌繁300</option><option value="000905.XSHG">涓瘉500</option></select></label>
+        <label>鎸囨爣 <select id="industryMetric"><option value="capital">甯傚€煎崰姣?/option><option value="turnover">鎴愪氦棰濆崰姣?/option></select></label>
+        <label>琛屼笟 <select id="industryChoice"><option value="">姣忔棩绗竴琛屼笟</option></select></label>
       </div>
-      <p class="data-note" id="industryStatus" role="status">正在读取日度快照</p>
+      <p class="data-note" id="industryStatus" role="status">姝ｅ湪璇诲彇鏃ュ害蹇収</p>
       <div class="chart-wrap"><div class="chart" id="marketIndustryChart"></div></div>
-      <details class="gap-report"><summary>计算口径</summary><p>市值用当日有效成分，成交额用当日有效成分。按申万一级分类（按周缓存），分子分母均剔除银行、非银金融和石油石化。固定申万 2014 版待 Wind API 核验。按各期实际占比识别第一行业并标注区间峰值。</p></details>
+      <details class="gap-report"><summary>璁＄畻鍙ｅ緞</summary><p>甯傚€肩敤褰撴棩鏈夋晥鎴愬垎锛屾垚浜ら鐢ㄥ綋鏃ユ湁鏁堟垚鍒嗐€傛寜鐢充竾涓€绾у垎绫伙紙鎸夊懆缂撳瓨锛夛紝鍒嗗瓙鍒嗘瘝鍧囧墧闄ら摱琛屻€侀潪閾堕噾铻嶅拰鐭虫补鐭冲寲銆傚浐瀹氱敵涓?2014 鐗堝緟 Wind API 鏍搁獙銆傛寜鍚勬湡瀹為檯鍗犳瘮璇嗗埆绗竴琛屼笟骞舵爣娉ㄥ尯闂村嘲鍊笺€?/p></details>
     </div>
   </section>
   <section class="part" id="marketFunds">
-    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketFundContent"><span>公募基金重仓集中度</span><span class="collapse-label">收起</span></button></h2>
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketFundContent"><span>鍏嫙鍩洪噾閲嶄粨闆嗕腑搴?/span><span class="collapse-label">鏀惰捣</span></button></h2>
     <div class="section-content" id="marketFundContent">
-      <div class="broad-controls"><label>行业 <select id="fundIndustry"><option value="">每季第一行业</option></select></label></div>
-      <p class="data-note" id="fundStatus" role="status">正在读取季度快照</p>
+      <div class="broad-controls"><label>琛屼笟 <select id="fundIndustry"><option value="">姣忓绗竴琛屼笟</option></select></label></div>
+      <p class="data-note" id="fundStatus" role="status">姝ｅ湪璇诲彇瀛ｅ害蹇収</p>
       <div class="chart-wrap"><div class="chart" id="marketFundChart"></div></div>
-      <details class="gap-report"><summary>计算口径</summary><p>标准股票型及偏股混合型基金，同一基金合并份额类别。按每只基金首次披露的前十大股票持仓统计其中的 A 股，以该样本持仓市值为分母。显示报告期、数据披露日期和基金覆盖。</p></details>
+      <details class="gap-report"><summary>璁＄畻鍙ｅ緞</summary><p>鏍囧噯鑲＄エ鍨嬪強鍋忚偂娣峰悎鍨嬪熀閲戯紝鍚屼竴鍩洪噾鍚堝苟浠介绫诲埆銆傛寜姣忓彧鍩洪噾棣栨鎶湶鐨勫墠鍗佸ぇ鑲＄エ鎸佷粨缁熻鍏朵腑鐨?A 鑲★紝浠ヨ鏍锋湰鎸佷粨甯傚€间负鍒嗘瘝銆傛樉绀烘姤鍛婃湡銆佹暟鎹姭闇叉棩鏈熷拰鍩洪噾瑕嗙洊銆?/p></details>
     </div>
   </section>
   <section class="part" id="marketFinancing">
-    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketFinanceContent"><span>融资与市场估值</span><span class="collapse-label">收起</span></button></h2>
+    <h2 class="pt"><button class="section-toggle" type="button" aria-expanded="true" aria-controls="marketFinanceContent"><span>铻嶈祫涓庡競鍦轰及鍊?/span><span class="collapse-label">鏀惰捣</span></button></h2>
     <div class="section-content" id="marketFinanceContent">
-      <div class="broad-controls"><label>叠加指数 <select id="financeIndex"><option value="">无</option></select></label></div>
-      <p class="data-note" id="financingStatus" role="status">正在读取融资与宏观快照</p>
+      <div class="broad-controls"><label>鍙犲姞鎸囨暟 <select id="financeIndex"><option value="">鏃?/option></select></label></div>
+      <p class="data-note" id="financingStatus" role="status">姝ｅ湪璇诲彇铻嶈祫涓庡畯瑙傚揩鐓?/p>
       <div class="chart-wrap"><div class="chart" id="marketBalanceChart"></div></div>
       <div class="chart-wrap"><div class="chart" id="marketLeverageChart"></div></div>
       <div class="chart-wrap"><div class="chart" id="marketValuationChart"></div></div>
-      <p class="coverage-note">沪深 A 股市值／住户存款 · 待 Wind API</p>
-      <details class="gap-report"><summary>计算口径</summary><p>融资余额取沪深两市融资余额。日均净增为较 20 个交易日前的余额差除以 20。周均同比用相隔 52 周的完整周均值。GDP 为最近四个已公布季度的名义 GDP 合计，M2 按公布日对齐。</p></details>
+      <p class="coverage-note">娌繁 A 鑲″競鍊硷紡浣忔埛瀛樻 路 寰?Wind API</p>
+      <details class="gap-report"><summary>璁＄畻鍙ｅ緞</summary><p>铻嶈祫浣欓鍙栨勃娣变袱甯傝瀺璧勪綑棰濄€傛棩鍧囧噣澧炰负杈?20 涓氦鏄撴棩鍓嶇殑浣欓宸櫎浠?20銆傚懆鍧囧悓姣旂敤鐩搁殧 52 鍛ㄧ殑瀹屾暣鍛ㄥ潎鍊笺€侴DP 涓烘渶杩戝洓涓凡鍏竷瀛ｅ害鐨勫悕涔?GDP 鍚堣锛孧2 鎸夊叕甯冩棩瀵归綈銆?/p></details>
     </div>
   </section>
 </main>
 </body>
 </html>
+

@@ -5,6 +5,24 @@ const charts = new Map();
 let snapshot;
 let pending;
 const modules = {};
+// 观测台切换是整页导航：保存各筛选控件的选择，切回本页时恢复上次视图
+const PERSISTED = ['marketDays', 'marketTableDays', 'marketTier', 'marketIndex',
+  'industryIndex', 'industryMetric', 'industryChoice', 'fundIndustry', 'financeIndex'];
+const choiceKey = id => 'ftshare-crowding-' + id;
+// 读取已保存且当前控件仍然存在的选项值，无效时返回 null
+function readChoice(id) {
+  const saved = localStorage.getItem(choiceKey(id));
+  return saved !== null && [...byId(id).options].some(option => option.value === saved) ? saved : null;
+}
+// 页面初始化时把保存的选择写回下拉框
+function restoreChoices() {
+  for (const id of PERSISTED) {
+    const saved = readChoice(id);
+    if (saved !== null) byId(id).value = saved;
+  }
+}
+// 控件变化时写入本地存储
+function saveChoice(id) { localStorage.setItem(choiceKey(id), byId(id).value); }
 
 function draw(id, title, dates, series, axes) {
   const dark = document.documentElement.dataset.theme === 'dark';
@@ -105,12 +123,14 @@ function renderIndustrySeries(id, title, rows, weights, choice) {
   draw(id, title, rows.map(r => r.date), series, ['占比（%）']);
 }
 
+// 重建行业下拉项，优先保留已保存或当前选择
 function setIndustries(id, values) {
-  const select = byId(id), current = select.value;
+  const select = byId(id), current = select.value, saved = localStorage.getItem(choiceKey(id));
   const names = [...new Set(values.flatMap(v => Object.keys(v ?? {})))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
   while (select.options.length > 1) select.remove(1);
   for (const name of names) select.add(new Option(name, name));
-  select.value = names.includes(current) ? current : '';
+  const preferred = names.includes(current) ? current : saved !== null && names.includes(saved) ? saved : '';
+  select.value = preferred;
 }
 
 function renderIndustry() {
@@ -141,6 +161,8 @@ function renderFinancing() {
   const picker = byId('financeIndex');
   if (picker.options.length === 1) {
     for (const [code, name] of Object.entries(indexes)) picker.add(new Option(name, code));
+    // 指数选项生成后恢复上次选择
+    picker.value = readChoice('financeIndex') ?? picker.value;
   }
   const dates = rows.map(r => r.date);
   const lastDate = key => rows.findLast(r => r[key] != null)?.date ?? '待发布';
@@ -207,7 +229,8 @@ async function load() {
     }
     if (byId('marketIndex').options.length === 1) {
       for (const [code, name] of Object.entries(snapshot.indexes)) byId('marketIndex').add(new Option(name, code));
-      byId('marketIndex').selectedIndex = 1;
+      // 指数选项动态生成后才能恢复上次选择，缺省选第一个指数
+      byId('marketIndex').value = readChoice('marketIndex') ?? byId('marketIndex').options[1].value;
     }
     renderSummary();
     renderConcentration();
@@ -228,6 +251,8 @@ for (const id of ['industryIndex', 'industryMetric', 'industryChoice']) {
 }
 byId('fundIndustry').addEventListener('change', () => { if (modules.funds) renderFunds(); });
 byId('financeIndex').addEventListener('change', () => { if (modules.financing) renderFinancing(); });
+// 所有筛选控件变化时写入本地存储，切换观测台后恢复
+for (const id of PERSISTED) byId(id).addEventListener('change', () => saveChoice(id));
 window.addEventListener('ftshare:theme-change', () => {
   if (snapshot) { renderConcentration(); renderStyle(); }
   for (const [name, [render]] of Object.entries(moduleViews)) if (modules[name]) render();
@@ -241,4 +266,5 @@ const observer = new IntersectionObserver(entries => {
   }
 }, {rootMargin: '200px'});
 for (const id of Object.keys(extraSections)) observer.observe(byId(id));
+restoreChoices();
 load();

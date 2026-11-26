@@ -198,6 +198,7 @@ def main():
                             "directions": {"sell": {"oi_decrease_cny": -1e7}}}}]}}}]
                 publish(root / "burst/live.json", futures_report)
                 wait("!!document.querySelector('.radar-futures-detail')")
+                assert evaluate("document.querySelector('#burstEvents td button').textContent.includes('1.00 亿元')")
                 evaluate("document.querySelector('.radar-futures-detail summary').click()")
                 assert evaluate("document.querySelector('.radar-futures-detail[open]').textContent.includes('主动卖成交额估算 0.80 亿')")
                 assert evaluate("document.querySelector('.radar-futures-detail[open]').textContent.includes('IF2612')")

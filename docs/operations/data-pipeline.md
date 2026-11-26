@@ -59,7 +59,7 @@
 
 已有 RQData 成交额导出时，可以用 `--burst-input` 离线回放。输入包含 `schema_version:2`、`metric:"turnover"`、`unit:"CNY"`，以及 `1m` 和 `1d` 两组 `[symbol, date, slot, amount]`；`amount` 为元，分钟与日线须同口径。实时和历史快照分目录保存。
 
-需要单日 ETF 和期货 Tick 同窗、日末申赎与 SQLite 日志时使用 `day-replay`，命令与离线输入见 [Tick 数据回放](../reference/tick-driver.md#tick-数据回放)。日度主动成交对照从独立专题 CSV 导入，快照可独立热加载，筛选与操作见[日度对照操作](runbook.md#35-日度主动成交与申赎对照)。
+需要单日 ETF 和期货 Tick 同窗、日末申赎与 SQLite 日志时使用 `day-replay`，命令与离线输入见 [Tick 数据回放](../reference/tick-driver.md#tick-数据回放)。日度主动成交对照由 `flow_comparison` 从 `data/private/flow-replay/<日期>/replay` 增量合并：22:00 生成 DDB replay（同时镜像到 `data/private/etf-burst/replay` 供 UI 回放），09:10 等待上一交易日 20/20 核心份额/净值就绪后再补齐；筛选与操作见[日度对照操作](runbook.md#35-日度主动成交与申赎对照)。
 
 ## 定时任务
 
@@ -67,10 +67,11 @@
 
 | 任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频与拥挤度更新 09:10` | 周一至周五 09:10 | `update-daily-all.ps1`（RQData + DDB） |
-| `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页/采集器 |
+| `ETF 日频与拥挤度更新 09:10` | 周一至周五 09:10 | `update-daily-all.ps1`（RQData + DDB + 拥挤度 + flow comparison） |
+| `ETF 开盘前启动 09:14` | 周一至周五 09:14 | 检查 8080，必要时启动网页/采集器 |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding` |
-| `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close` |
+| `ETF 收盘补全 15:10` | 周一至周五 15:10 | 已停用；由夜间 DDB 复盘替代 |
+| `ETF 夜间 DDB 复盘 22:00` | 周一至周五 22:00 | `update-flow-replay.ps1 -Source ddb` + 当日 flow comparison |
 | `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
 
 采集器为常驻进程：09:15 自动切换新交易日，15:02 后空闲；每天写 `data/private/collector.heartbeat`，`start-collector.cmd` 依据心跳避免重复启动。

@@ -7,10 +7,10 @@
 
 <meta name="theme-color" content="#f2f6f6">
 <script>try{var m=localStorage.getItem('ftshare-theme')||'system';document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=m==='dark'||m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}catch(e){document.documentElement.dataset.theme='light';}</script>
-<link rel="stylesheet" href="style.css?v=20261120c">
+<link rel="stylesheet" href="style.css?v=20261126a">
 <script src="/echarts.min.js" defer></script>
-<script src="/assets/presentation.js?v=20261120c" type="module"></script>
-<script src="/assets/dashboard.js?v=20261120c" type="module"></script>
+<script src="/assets/presentation.js?v=20261126a" type="module"></script>
+<script src="/assets/dashboard.js?v=20261126a" type="module"></script>
 </head>
 <body>
 <div class="demo-notice" role="status">演示模式 · 当前展示程序生成的行情与资金样本。数据接入方式见各图来源说明。</div>
@@ -212,6 +212,13 @@
         <div class="broad-controls" aria-label="主动成交对照筛选条件">
           <label>开始日期 <input id="flowCompareStart" type="date"></label>
           <label>结束日期 <input id="flowCompareEnd" type="date"></label>
+          <label class="follow-latest"><input id="flowCompareLatest" type="checkbox" checked> 结束日期跟随最新</label>
+          <label>数据状态 <select id="flowCompareStatus">
+            <option value="all">全部数据状态</option>
+            <option value="burst">有确认放量</option>
+            <option value="no-burst">无确认放量</option>
+            <option value="missing">数据缺失/待补</option>
+          </select></label>
           <label>ETF 标的 <select id="flowCompareSymbol"><option value="">全部标的</option></select></label>
           <button type="button" id="flowCompareReset">重置筛选</button>
         </div>

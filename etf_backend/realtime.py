@@ -35,6 +35,48 @@ def feed_time(value):
     return provider.local_time(value)
 
 
+def etf_quote_direction(tape):
+    """Estimate ETF active buy/sell turnover from L1 trades and the quote rule.
+
+    ``tape`` rows are ``(time, ask, bid, iopv, cumulative_volume, last)``.
+    A trade at/above the ask is buy-side, at/below the bid is sell-side; inside
+    the spread we use the midpoint. Volume deltas times trade price give a CNY
+    estimate. This is intentionally the same, simple economic idea as the
+    daily midpoint-band direction archive.
+    """
+    buy = sell = neutral = 0.0
+    prior = None
+    covered = 0
+    for row in tape:
+        t, ask, bid, _, volume, last = row
+        if prior is not None:
+            _, _, _, _, previous_volume, _ = prior
+            delta = volume - previous_volume if volume is not None and previous_volume is not None else 0
+            if delta > 0 and last is not None and last > 0:
+                cash = delta * last
+                covered += 1
+                if ask is not None and bid is not None and 0 < bid <= ask:
+                    mid = (ask + bid) / 2
+                    side = "buy" if last >= ask - 1e-9 else "sell" if last <= bid + 1e-9 else (
+                        "buy" if last > mid else "sell" if last < mid else "neutral")
+                else:
+                    side = "neutral"
+                if side == "buy":
+                    buy += cash
+                elif side == "sell":
+                    sell += cash
+                else:
+                    neutral += cash
+        prior = row
+    total = buy + sell + neutral
+    if covered < 2 or total <= 0:
+        return None
+    side = "buy" if buy > sell else "sell" if sell > buy else "neutral"
+    return {"side": side, "buy_cny": round(buy, 2), "sell_cny": round(sell, 2),
+            "neutral_cny": round(neutral, 2), "method": "l1-quote-midpoint-v1",
+            "coverage": covered}
+
+
 class PushSession:
     def __init__(self, api, day, funds, path, burst_dir, q, symbols=BASKET, minute_driver="provider", futures_enabled=False):
         if minute_driver not in {"provider", "tick"}:
@@ -60,7 +102,7 @@ class PushSession:
         self.minute_version = -1
         self.board_signature = None
         self.reference_path = burst_dir / "baselines" / f"{day}.json"
-        self.ticks = defaultdict(lambda: deque(maxlen=320))
+        self.ticks = defaultdict(lambda: deque(maxlen=1800))
         self.mapping = {s.replace(".SH", ".XSHG").replace(".SZ", ".XSHE"): s for s in self.symbols + [INDEX]}
         self.groups = {f["symbol"]: f["bucket"] for f in funds if f["symbol"] in self.symbols}
         self.index_codes = {s: INDEX_GROUPS.get(group) for s, group in self.groups.items()}
@@ -418,7 +460,7 @@ class PushSession:
             asks, bids = msg.get("ask") or [], msg.get("bid") or []
             ask = provider.number(asks[0] if asks else msg.get("a1"))
             bid = provider.number(bids[0] if bids else msg.get("b1"))
-            tape.append((t, ask, bid, provider.number(msg.get("iopv")), provider.number(msg.get("volume"))))
+            tape.append((t, ask, bid, provider.number(msg.get("iopv")), provider.number(msg.get("volume")), close))
         return True
 
     def evidence(self, event):
@@ -427,7 +469,7 @@ class PushSession:
         tape = [row for row in self.ticks[symbol] if end - timedelta(minutes=2) <= row[0] <= end]
         pressure, premium, since, discount, prior, last_iopv, changed = None, None, None, False, None, None, None
         changes = 0
-        for t, ask, bid, iopv, vol in tape:
+        for t, ask, bid, iopv, vol, last in tape:
             valid = ask and bid and ask >= bid
             if valid and prior and end - t <= timedelta(seconds=30):
                 _, pa, _, _, pv = prior
@@ -464,7 +506,13 @@ class PushSession:
             ret = close / before - 1
             p95 = self.index_baseline.get((code, event["last"]))
             index = {"pct": ret * 100, "above_p95": p95 is not None and ret > p95}
-        for key, value in {"premium": premium, "pressure": pressure, "peers": other or None, "index": index}.items():
+        peak = event.get("peak") or {}
+        start_slot, end_slot = peak.get("start") or event["first"], peak.get("end") or event["last"]
+        start = datetime.fromisoformat(self.day + "T" + start_slot).replace(tzinfo=provider.CHINA)
+        finish = datetime.fromisoformat(self.day + "T" + end_slot).replace(tzinfo=provider.CHINA)
+        direction = etf_quote_direction([row for row in self.ticks[symbol] if start <= row[0] <= finish])
+        for key, value in {"premium": premium, "pressure": pressure, "peers": other or None,
+                           "index": index, "etf_direction": direction}.items():
             if value is not None:
                 event["evidence"][key] = value
 

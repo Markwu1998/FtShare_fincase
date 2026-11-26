@@ -116,8 +116,10 @@ def detect(values, end, baseline, shadow=False):
 
 
 class BurstDay:
-    def __init__(self, day, baseline, quantile_value, replay=False, symbols=BASKET, baseline_as_of=None):
+    def __init__(self, day, baseline, quantile_value, replay=False, symbols=BASKET, baseline_as_of=None,
+                 provider="RQData"):
         self.day, self.baseline, self.quantile, self.replay = day, baseline, quantile_value, replay
+        self.provider = provider
         self.values = {s: [None] * len(SLOTS) for s in symbols}
         self.latest = {}
         self.events = []
@@ -194,7 +196,7 @@ class BurstDay:
                 "basket_hash": sha256("\n".join(self.values).encode()).hexdigest(),
                 "minute_coverage": {"expected": END + 1, "received": {s: sum(v is not None for v in values)
                                                                          for s, values in self.values.items()}},
-                "symbols": list(self.values), "provider": "RQData", "date": self.day, "quantile": self.quantile, "metric": "turnover", "replay": self.replay,
+                "symbols": list(self.values), "provider": self.provider, "date": self.day, "quantile": self.quantile, "metric": "turnover", "replay": self.replay,
                 "through": SLOTS[max(self.latest.values())] if self.latest else None,
                 "updated_at": iso_utc(datetime.now(CHINA)), "events": self.events, "median_hits": self.shadow,
                 "accounting": self.accounting()}

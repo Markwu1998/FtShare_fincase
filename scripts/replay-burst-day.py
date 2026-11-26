@@ -14,6 +14,7 @@ from tempfile import NamedTemporaryFile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from etf_backend import ddb_replay
 from etf_backend.burst import END, RULE_VERSION, SLOT_INDEX, make_baseline, query_history
 from etf_backend.burst_ledger import BurstLedger
 from etf_backend.collect import publish, read
@@ -65,7 +66,9 @@ def prepare_baseline(api, day, symbols, q, path):
     })
 
 
-def daily_flow_summary(day, funds, inputs):
+def daily_flow_summary(day, funds, inputs, provider=None):
+    """Summarise daily net creations; the cached inputs may carry their own source label."""
+    provider = provider or inputs.get("provider") or "RQData"
     calendar = [inputs["previous_date"], inputs["date"]]
     if calendar[-1] != day or date.fromisoformat(calendar[0]) >= date.fromisoformat(day):
         raise ValueError("Fund flow input has incompatible dates")
@@ -83,7 +86,7 @@ def daily_flow_summary(day, funds, inputs):
         row["flow_cny"] = flow_yi * 1e8 if finite(flow_yi) else None
         by_symbol[symbol] = row
     valid = [row["flow_cny"] for row in by_symbol.values() if finite(row["flow_cny"])]
-    return {"date": day, "previous_date": calendar[0], "provider": "RQData", "unit": "CNY",
+    return {"date": day, "previous_date": calendar[0], "provider": provider, "unit": "CNY",
             "valid": len(valid), "expected": len(funds), "net_flow_cny": sum(valid) if len(valid) == len(funds) else None,
             "by_symbol": by_symbol}
 
@@ -289,8 +292,6 @@ def main():
     parser.add_argument("--config", type=Path, default=ROOT / os.environ.get("ETF_BURST_CONFIG", "config/etf-burst.json"))
     parser.add_argument("--out", type=Path, help="Replay directory, not the live collector directory")
     args = parser.parse_args()
-    if args.source == "ddb":
-        parser.error("DDB single-day replay is pending the ETF and index futures Tick data interface")
     day = args.day
     config = read(args.config)
     q = config.get("amount_window_quantile", config.get("volume_window_quantile", .75))
@@ -301,6 +302,7 @@ def main():
     funds = [universe[s] for s in symbols]
     product_by_symbol = {f["symbol"]: PRODUCTS[f["bucket"]] for f in funds if f["bucket"] in PRODUCTS}
     products = set(product_by_symbol.values())
+    provider = "DDB" if args.source == "ddb" else "RQData"
     out = args.out or ROOT / ".local" / "burst-day-replay" / day
     collector_dir = ROOT / os.environ.get("ETF_BURST_DIR", "data/private/etf-burst")
     archive = out / "replay" / f"{day}.json"
@@ -317,6 +319,14 @@ def main():
     if args.input_dir is None and cache.is_file() and read(cache) != identity:
         parser.error("This output directory contains downloads for a different replay selection")
     api = None
+    session = None
+
+    def ddb_session():
+        nonlocal session
+        if session is None:
+            session = ddb_replay.connect()
+        return session
+
     baseline_path = args.baseline or directory / "baseline.json"
     generated_baseline = out / "inputs" / "baseline.json"
     if args.baseline:
@@ -331,9 +341,12 @@ def main():
                 continue
         if baseline is None:
             if args.offline:
-                parser.error("No compatible prior-day baseline; supply --baseline or allow RQData history")
-            api = connect_rqdata()
-            prepare_baseline(api, day, symbols, q, generated_baseline)
+                parser.error("No compatible prior-day baseline; supply --baseline or allow history generation")
+            if args.source == "ddb":
+                ddb_replay.prepare_baseline(ddb_session(), day, symbols, q, generated_baseline)
+            else:
+                api = connect_rqdata()
+                prepare_baseline(api, day, symbols, q, generated_baseline)
             baseline, prior = baseline_for(generated_baseline, day, symbols, q)
     if args.input_dir is None and not args.offline:
         if not cache.is_file():
@@ -343,20 +356,26 @@ def main():
         expected_futures = [c for codes in recorded.values() for c in codes]
         if (set(recorded) != products or not all((directory / "etf" / (s + ".csv")).is_file() for s in symbols) or
                 not all((directory / "futures" / (c + ".csv")).is_file() for c in expected_futures)):
-            api = api or connect_rqdata()
-            rqdata_input(api, day, symbols, products, directory)
+            if args.source == "ddb":
+                ddb_replay.write_inputs(ddb_session(), day, symbols, products, directory)
+            else:
+                api = api or connect_rqdata()
+                rqdata_input(api, day, symbols, products, directory)
     flow_path = out / "inputs" / "fund-flow.json"
     flow_input = next((p for p in (flow_path, directory / "fund-flow.json") if p.is_file()), None)
     daily_flow = None
     if flow_input:
-        daily_flow = daily_flow_summary(day, funds, read(flow_input))
+        daily_flow = daily_flow_summary(day, funds, read(flow_input), provider=provider)
     if not args.offline and (daily_flow is None or daily_flow["valid"] < len(funds)):
         try:
-            inputs = fetch_daily_flow(api or connect_rqdata(), day, symbols)
+            if args.source == "ddb":
+                inputs = ddb_replay.fund_input(ddb_session(), day, symbols)
+            else:
+                inputs = fetch_daily_flow(api or connect_rqdata(), day, symbols)
         except ValueError as error:
             print(f"Daily fund flow unavailable: {error}", file=sys.stderr, flush=True)
         else:
-            daily_flow = daily_flow_summary(day, funds, inputs)
+            daily_flow = daily_flow_summary(day, funds, inputs, provider=provider)
             publish(flow_path, inputs)
             print(f"Daily fund flow: {daily_flow['valid']}/{daily_flow['expected']}", flush=True)
     factor_refs = None
@@ -383,7 +402,7 @@ def main():
     tick_rows = ([symbol, market.isoformat(), received.isoformat(), values["last"], values["total_turnover"], values["volume"]]
                  for received, market, symbol, values in etf_records)
     report = replay_tick_day(day, baseline, q, tick_rows, symbols, prior, boundary_mode="provider-v2",
-                             factor_references=factor_refs, include_volume=True)
+                             factor_references=factor_refs, include_volume=True, provider=provider)
     if report["through"] is None:
         parser.error("ETF Tick yielded no usable minute bars")
     report["replay_clock"] = args.clock

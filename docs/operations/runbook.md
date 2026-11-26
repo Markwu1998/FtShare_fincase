@@ -96,13 +96,14 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 
 | 建议任务 | 触发（Asia/Shanghai） | 动作 |
 |---|---|---|
-| `ETF 日频与拥挤度更新 09:10` | 周一至周五 09:10 | `update-daily-all.ps1`：RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 |
+| `ETF 日频与拥挤度更新 09:10` | 周一至周五 09:10 | `update-daily-all.ps1`：RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 + flow comparison |
 | `ETF 周六公募拥挤度` | 周六 09:00 | 公募重仓（季度） |
 | `ETF 日频补采 12:30` | 周一至周五 12:30 | `update-sources.ps1 -SkipCrowding`（RQData + 可选 DDB），补晚披露 |
-| `ETF 开盘前启动 08:25` | 周一至周五 08:25 | 检查 8080，必要时启动网页与采集器，输出状态 |
-| `ETF 收盘补全 15:10` | 周一至周五 15:10 | `live --close`，用当日 1m 线补全到 15:00 |
+| `ETF 开盘前启动 09:14` | 周一至周五 09:14 | 检查 8080，必要时启动网页与采集器，输出状态 |
+| `ETF 收盘补全 15:10` | 已停用，由夜间 DDB 复盘替代 |
+| `ETF 夜间 DDB 复盘 22:00` | 周一至周五 22:00 | `update-flow-replay.ps1 -Source ddb`，生成 DDB replay 并尝试合并当日 flow comparison |
 
-09:10 总更新任务同时构建 RQData 与 DDB，并更新拥挤度；12:30 仍保留 ETF/DDB 晚披露补采。
+09:10 总更新任务同时构建 RQData 与 DDB，并更新拥挤度和上一交易日 flow comparison；22:00 只生成当日 DDB replay，并在 DDB 日末净申赎齐全时合并当日对照，未齐则留到次日 09:10 补齐。
 
 说明：
 
@@ -129,14 +130,14 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 | 北京时间 | 动作 | 谁负责 |
 |---|---|---|
 | 登录时 | 启动网页 + 采集器 | Windows 任务（可选）或手动 |
-| 08:25 | 检查并启动网页/采集器 | DSH `ETF 开盘前启动 08:25` |
-| 09:10 | RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 | DSH `ETF 日频与拥挤度更新 09:10` |
+| 09:14 | 检查并启动网页/采集器 | DSH `ETF 开盘前启动 09:14` |
+| 09:10 | RQData + DDB ETF + 日度拥挤度 + 融资 + 行业 + 上一交易日 flow comparison | DSH `ETF 日频与拥挤度更新 09:10` |
 | 周六 09:00 | 公募（季度）更新 | DSH `ETF 周六公募拥挤度` |
 | 09:15–09:30 | 采集器预载 60 日分钟基准 | 采集器 |
 | 09:30–15:02 | 实时推送，写盘中缓存 | 采集器 |
 | 12:30 | 第二次日频增量（RQData + 可选 DDB，`-SkipCrowding`） | DSH `ETF 日频补采 12:30` |
-| 15:10 | 用当日 1m 线补全盘中缓存到 15:00 | DSH `ETF 收盘补全 15:10` |
 | 15:02 后 | 采集器空闲，等下一交易日 | 采集器 |
+| 22:00 | 生成当日 DDB replay，DDB 净申赎齐全时合并 flow comparison | DSH `ETF 夜间 DDB 复盘 22:00` |
 
 ### 3.2 手动启动 / 停止
 
@@ -164,7 +165,7 @@ netstat -ano | findstr ":8080" | findstr LISTENING
 - `/api/live` 返回 200，`last_complete_minute` 在推进；
 - 页面「ETF 异动雷达」显示盘中状态。
 
-**收盘后（15:10 之后）**
+**收盘后/夜间（22:00 之后）**
 
 - 当天分钟缓存的 `fetched_at` 是今天；
 - 若 18:00 后份额/净值已披露，可手动补一次 `update-daily.cmd`。
@@ -178,7 +179,9 @@ Windows 在项目根目录执行以下命令。填写完整交易日期，每次
   '--day=2026-11-20', '--source=rqdata', '--out=.local/day-replay-20261120')
 ```
 
-1. 脚本优先复用兼容基准，否则用目标日前 60 个交易日的分钟线和日线生成 20／60 日同窗与全天参考。额度有限时可另用独立目录，通过 `--symbols 510050.SH` 先试单只；下载中断后，用原命令与原输出目录续跑，已完成的标的不再请求。
+使用 DolphinDB 时不依赖 RQData：把 `--source=rqdata` 换成 `--source=ddb` 即可。ETF/期货 Tick、60 日基准、当日合约与份额净值都从 DDB 读取，产物结构与 RQData 模式一致，后续归档、日志和网页回放步骤不变。DDB 没有独立接收时刻，只支持 `--clock=market`。
+
+1. 脚本优先复用兼容基准，否则用目标日前 60 个交易日的分钟线和日线生成 20／60 日同窗与全天参考。DDB 模式的分钟基准由目标日前 60 个交易日的 `MDSnapshot` 累计成交额聚合而来。额度有限时可另用独立目录，通过 `--symbols 510050.SH` 先试单只；下载中断后，用原命令与原输出目录续跑，已完成的标的不再请求。
 2. 查看输出目录中的 `replay/日期.json` 和 `journals/日期.sqlite3`。先核对基准截止日、标的 Tick 与分钟覆盖、期货合约覆盖和秒级基准状态，再看预警、确认、金额及合约分布。ETF 异动金额按标的与分钟去重。期货主动卖成交额、净增仓名义额、卖侧增仓代理额分别判断；覆盖不足的窗口以归档状态为准。
 3. 如需在网页查看，另开 PowerShell，把 `ETF_BURST_DIR` 指向该输出目录，使用空闲端口启动 `web`，在「ETF 异动雷达」选择日期和回放时点。示例端口为 8086。
 
@@ -200,10 +203,29 @@ Windows 在项目根目录执行以下命令。填写完整交易日期，每次
 
 盘中主动买卖使用 RQData Tick 区间均价与上一档盘口中点的方向估算。统计范围为确认放量窗口的并集。日末净申赎为同标的同日的份额变化乘单位净值估算。差额等于主动买减日末净申赎。汇总金额仅累计三个字段均有效的记录，配对数标记汇总的覆盖。已回放且无确认放量的标的日，主动买卖为零。缺份额时，明细仍显示有效的盘中买卖金额，净申赎和差额留空。
 
+自动链路：每日 22:00 由 `scripts/update-flow-replay.ps1 -Source ddb` 生成 DDB 单日 replay，并镜像到 `data/private/etf-burst/replay/<日期>.json` 供“单只 ETF · 盘中集中交易”回放；若 DDB 当日 20/20 日末净申赎已齐，则同时合并 `data/private/etf-flow-comparison.json`，否则保持 pending，次日 09:10 继续补齐。
+
 用中点灰区专题回放的 `etf_daily_series.csv` 导入完整目标区间，字段见[数据与计算](../reference/flow-methodology.md#主动成交与净申赎对照)。标准 `day-replay` 写入单日雷达 JSON 和日志。主动成交对照使用独立的标的日 CSV。以下为本地 2026-08-20 至 2026-11-20 示例，使用项目的 Python 环境执行，命令会原子替换私有快照。`.local` 研究输出按授权随部署迁移。
 
 ```powershell
 python -m etf_backend.flow_comparison .local/etf-direction-20260820-20261120/etf_daily_series.csv
+```
+
+没有独立研究 CSV 时，可先用 DDB 单日回放产物生成同一口径的标的日 CSV，再导入：
+
+```powershell
+# 1) 从多日回放目录生成标的日 CSV：确认窗口分钟取 replay，方向取 DDB 快照买一/卖一中点灰区
+python -m etf_backend.flow_comparison --from-replay .local/flow-20d/replays --out .local/flow-20d/etf-flow-20d.csv
+
+# 2) 导入并原子替换私有快照
+python -m etf_backend.flow_comparison .local/flow-20d/etf-flow-20d.csv
+```
+
+`--from-replay` 读取每个 `replay/<日期>.json` 的 `accounting.minutes`（确认窗口分钟并集）与 `daily_flow.by_symbol`，并从 `MDSnapshot` 取同日十档买一/卖一，按区间均价与中点加十分之一价差判定主动买卖。只纳入覆盖全部 20 只核心 ETF 的日期；已回放但无确认放量的标的日盘中金额记为零。批量回放前可一次聚合历史：
+
+```powershell
+# 一次聚合 60 个历史交易日，按每个回放日写出对应 baseline.json（日期用逗号分隔，须为 DDB 交易日）
+python -m etf_backend.ddb_replay --days "<回放日1>,<回放日2>,..." --out .local/flow-20d/baselines
 ```
 
 网页从 `data/private/etf-flow-comparison.json` 读取已导入的日期。重新导入后刷新页面即可查看更新。迁移应用时将该快照放到目标项目的数据目录。
@@ -413,5 +435,5 @@ Unregister-ScheduledTask -TaskName FtShare-UpdateDaily -Confirm:$false
 | 端口统一 8080 | README、文档、启动脚本、`.env.example` 一致 |
 | `.env` UTF-8 | 启动脚本按 UTF-8 读取，中文注释不再吞行 |
 | 运维脚本 | `start-web.cmd`、`start-collector.cmd`、`update-daily.cmd`、`setup-tasks.cmd`、`status.cmd` |
-| DSH 定时任务 | 09:10 总更新、12:30 补采、08:25 开盘前启动 |
+| DSH 定时任务 | 09:10 总更新、12:30 补采、09:14 开盘前启动 |
 | 采集器心跳 | `data/private/collector.heartbeat`，`start-collector.cmd` 据此防止重复启动 |

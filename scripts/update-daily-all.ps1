@@ -49,6 +49,12 @@ Invoke-Step 'Crowding industry' {
     & $backend -Mode crowding -Arguments @('--crowding-module=industry')
 }
 
+# 6. Prior-day flow comparison. Fund shares/NAV can land at ~09:10, so the
+# Python step waits for the previous trading day's 20/20 core flows.
+Invoke-Step 'Flow comparison' {
+    & $backend -Mode flow-comparison -Arguments @('--merge', '--wait', '900')
+}
+
 if ($failed.Count -gt 0) {
     Write-Warning "Daily update completed with failures: $($failed -join ', ')"
     exit 1

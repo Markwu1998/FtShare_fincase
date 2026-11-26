@@ -108,6 +108,8 @@ class TickAggregationTest(unittest.TestCase):
         self.assertEqual(replay["median_hits"], original.payload()["median_hits"])
         self.assertEqual(replay["through"], "14:57")
         self.assertEqual(replay["minute_coverage"]["received"][SYMBOL], 237)
+        self.assertEqual(replay["provider"], "RQData")
+        self.assertEqual(replay_tick_day(DAY, reference(), .75, ticks, [SYMBOL], provider="DDB")["provider"], "DDB")
 
     def test_tick_replay_validates_reception_order_and_timezone(self):
         records = [[SYMBOL, clock("09:30:59").isoformat(), clock("09:31:00").isoformat(), 1, 100],

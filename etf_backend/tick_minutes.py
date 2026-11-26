@@ -153,7 +153,7 @@ def partial_signals(aggregator, detector, now):
 
 
 def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, boundary_mode='legacy-right',
-                    factor_references=None, include_volume=False):
+                    factor_references=None, include_volume=False, provider="RQData"):
     """Replay recorded reception order; do not move late data back in time.
 
     Rows: [symbol, market_timestamp, received_timestamp, close, day_turnover].
@@ -162,7 +162,8 @@ def replay_tick_day(day, baseline, q, ticks, symbols, baseline_as_of=None, bound
     aggregator = TickMinutes(day, symbols, symbols, boundary_mode)
     volume_aggregator = TickMinutes(day, symbols, symbols, boundary_mode) if include_volume else None
     volumes = {}
-    detector = BurstDay(day, baseline, q, replay=True, symbols=symbols, baseline_as_of=baseline_as_of)
+    detector = BurstDay(day, baseline, q, replay=True, symbols=symbols, baseline_as_of=baseline_as_of,
+                        provider=provider)
     last_received, candidates, levels = None, [], {}
     tick_history, factor_states = [], {}
 

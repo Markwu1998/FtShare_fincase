@@ -415,7 +415,7 @@ function acceptLive(next){
  if(realtimeMeta&&!realtimeMeta.ready){realtimeMeta.ready=true;renderSourceControls();}
  if(!live.replay&&Date.now()-liveStoredAt>=15000){save('ftshare-last-live-v1',live);liveStoredAt=Date.now();}
  safely('即时行情',renderQuotes);
- if(minuteChanged){safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);if(radar)safely('异动雷达',()=>radar.render(seed,live));}
+ if(minuteChanged){safely('成交节奏',renderCases);safely('放量信号',renderSignals);safely('当日记录',mergeLiveHistory);safely('实时图表',renderMinute);if(radar)safely('异动雷达',()=>radar.render(seed,live));}
  if(live.cache?.stale)tag('tagUpdate','行情已陈旧 · '+live.fetched_at,'warn');
 }
 function startLiveStream(){
@@ -510,21 +510,42 @@ async function loadFlowComparison(){
  catch{status.textContent='暂无盘口回放对照数据。';return;}
  const rows=archive.rows;
  const dates=rows.map(row=>row.day).sort();
- const start=$('flowCompareStart'),end=$('flowCompareEnd'),symbol=$('flowCompareSymbol');
+ const start=$('flowCompareStart'),end=$('flowCompareEnd'),symbol=$('flowCompareSymbol'),statusFilter=$('flowCompareStatus');
  const first=dates[0],last=dates[dates.length-1];
+ const filterState=saved('ftshare-flow-compare')||{};
+ const followLatest=filterState.latest!==false;
+ $('flowCompareLatest').checked=followLatest;
  for(const input of [start,end]){input.min=first;input.max=last;}
- start.value=first;end.value=last;
+ const savedStart=filterState.start;
+ const savedEnd=filterState.end;
+ start.value=savedStart&&savedStart>=first&&savedStart<=last?savedStart:first;
+ end.value=followLatest?last:(savedEnd&&savedEnd>=first&&savedEnd<=last?savedEnd:last);
+ end.disabled=followLatest;
+ const validStatuses=['all','burst','no-burst','missing'];
+ statusFilter.value=validStatuses.includes(filterState.status)?filterState.status:'all';
  for(const code of [...new Set(rows.map(row=>row.symbol))].sort())symbol.add(new Option(code,code));
- let view='detail',page=0;
+ symbol.value=[...symbol.options].some(option=>option.value===filterState.symbol)?filterState.symbol:'';
+ let view=['detail','symbol','day'].includes(filterState.view)?filterState.view:'detail',page=0;
+ const persist=()=>{
+  if($('flowCompareLatest').checked)end.value=last;
+  save('ftshare-flow-compare',{start:start.value,end:end.value,symbol:symbol.value,view,latest:$('flowCompareLatest').checked,status:statusFilter.value});
+ };
+ const statusOf=row=>{
+  const missing=!Number.isFinite(row.active_buy_yi)||!Number.isFinite(row.net_flow_yi)||Boolean(row.flow_issues);
+  return missing?'missing':row.gross_yi===0?'no-burst':'burst';
+ };
  const pageSize=20,buttons=[...$('flowCompareViews').querySelectorAll('button')];
+ for(const button of buttons)button.setAttribute('aria-pressed',String(button.dataset.view===view));
  const money=(value,signed=false)=>Number.isFinite(value)?(signed?sign(value):fmt(value)):'—';
  const cells=(buy,sell,flow,gap)=>[buy,sell,flow,gap].map((value,i)=>{
   const color=i>=2?(value>0?' up':value<0?' down':''):'';
   return '<td class="num'+color+'">'+money(value,i>=2)+'</td>';
  }).join('');
  function render(){
+  if($('flowCompareLatest').checked)end.value=last;
   const from=start.value||first,to=end.value||last;
-  const selected=rows.filter(row=>row.day>=from&&row.day<=to&&(!symbol.value||row.symbol===symbol.value));
+  const selected=rows.filter(row=>row.day>=from&&row.day<=to&&(!symbol.value||row.symbol===symbol.value)
+   &&(statusFilter.value==='all'||statusOf(row)===statusFilter.value));
   const summary=summarizeFlowComparison(selected);
   const summaryText=$('flowCompareSummary');
   summaryText.classList.toggle('has-gaps',summary.paired!==summary.total);
@@ -559,12 +580,22 @@ async function loadFlowComparison(){
   $('flowCompareNext').disabled=page+1>=pages;
  }
  const resetPage=()=>{page=0;render();};
- for(const input of [start,end,symbol])input.addEventListener('change',resetPage);
- $('flowCompareReset').addEventListener('click',()=>{start.value=first;end.value=last;symbol.value='';resetPage();});
+ for(const input of [start,end,symbol,statusFilter])input.addEventListener('change',()=>{resetPage();persist();});
+ $('flowCompareLatest').addEventListener('change',()=>{
+  end.disabled=$('flowCompareLatest').checked;
+  if($('flowCompareLatest').checked)end.value=last;
+  resetPage();persist();
+ });
+ $('flowCompareReset').addEventListener('click',()=>{
+  $('flowCompareLatest').checked=true;end.disabled=true;
+  start.value=first;end.value=last;symbol.value='';view='detail';statusFilter.value='all';
+  for(const button of buttons)button.setAttribute('aria-pressed',String(button.dataset.view==='detail'));
+  resetPage();persist();
+ });
  for(const button of buttons)button.addEventListener('click',()=>{
   view=button.dataset.view;
   for(const item of buttons)item.setAttribute('aria-pressed',String(item===button));
-  resetPage();
+  resetPage();persist();
  });
  $('flowComparePrev').addEventListener('click',()=>{page--;render();});
  $('flowCompareNext').addEventListener('click',()=>{page++;render();});
